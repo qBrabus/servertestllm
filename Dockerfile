@@ -36,6 +36,7 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-deps numpy==1.26.4 && \
     python3 -m pip install -r /app/requirements.txt
 
 COPY backend /app/backend
