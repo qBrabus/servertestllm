@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM/ASR/Diar Admin</title>
+    <style>
+      body { background:#0a0a0a; color:#eee; font-family: system-ui, sans-serif; }
+      a { color:#9cf; }
+    </style>
+  </head>
+  <body>
+    <div id="root">Loading UI...</div>
+    <script>
+      async function json(url){ const r = await fetch(url); return r.json(); }
+      function el(tag, props={}, children=[]) { const e = document.createElement(tag); Object.assign(e, props); children.forEach(c => e.appendChild(c)); return e; }
+      function text(t){ return document.createTextNode(t); }
+
+      function gpuCard(g){
+        const memPct = Math.round(100 * g.memory_used_mb / g.memory_total_mb);
+        const card = el('div', { className:'gpu-card' }, [
+          el('div', { innerText: `${g.name} (#${g.index})`, style:'font-weight:bold;font-size:18px;' }, []),
+          el('div', { innerText: `Utilisation: ${g.utilization_pct}% • Temp: ${g.temperature_c}°C` }),
+          el('div', { innerText: `VRAM: ${g.memory_used_mb} / ${g.memory_total_mb} MB (${memPct}%)` }),
+          el('div', { style:'height:8px;background:#333;border-radius:6px;margin-top:6px;' }, [
+            el('div', { style:`height:100%;width:${memPct}%;background:#4caf50;border-radius:6px;` })
+          ])
+        ]);
+        card.style = 'border:1px solid #333;padding:12px;border-radius:12px;background:#111;margin-bottom:12px;';
+        return card;
+      }
+
+      async function refresh(){
+        const root = document.getElementById('root');
+        root.innerHTML = '';
+        const h1 = el('h1', { innerText: 'LLM / ASR / Diar Admin' });
+        root.appendChild(h1);
+
+        const services = await json('/api/services').catch(()=>null);
+        const sec1 = el('section'); sec1.appendChild(el('h2', { innerText: 'Services' }));
+        const names = [['vLLM (Qwen3-VL-30B-A3B)', 'vllm'], ['ASR (Canary 1B v2)', 'asr'], ['Diarization (pyannote community-1)', 'diar']];
+        const grid = el('div'); grid.style = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;';
+        names.forEach(([label, key]) => {
+          const st = services && services[key] ? services[key] : null;
+          const ok = st && st.ok;
+          const card = el('div', { style:'border:1px solid #333;padding:12px;border-radius:12px;background:#111;color:#eee;' });
+          card.appendChild(el('div', { innerText: label, style:'font-weight:bold;font-size:18px;' }));
+          card.appendChild(el('div', { innerText: 'Status: ' + (ok ? 'OK' : 'Down') }));
+          if(!ok && st){ const pre = el('pre'); pre.innerText = JSON.stringify(st, null, 2); card.appendChild(pre); }
+          grid.appendChild(card);
+        });
+        sec1.appendChild(grid);
+        root.appendChild(sec1);
+
+        const gpus = await json('/api/gpus').catch(()=>null);
+        const sec2 = el('section'); sec2.appendChild(el('h2', { innerText: 'GPUs' }));
+        if(gpus && gpus.gpus){ gpus.gpus.forEach(g => sec2.appendChild(gpuCard(g))); }
+        root.appendChild(sec2);
+
+        const sec3 = el('section'); sec3.appendChild(el('h2', { innerText: 'Endpoints' }));
+        const ul = el('ul');
+        [['OpenAI LLM', '/v1/chat/completions (via vLLM)'],
+         ['ASR', '/v1/audio/transcriptions (via Canary)'],
+         ['Diarization', '/v1/audio/diarize (via pyannote)']].forEach(([k,v]) => {
+           const li = el('li'); li.appendChild(text(k + ': ')); li.appendChild(el('code', { innerText: v })); ul.appendChild(li);
+         });
+        sec3.appendChild(ul);
+        root.appendChild(sec3);
+      }
+      refresh(); setInterval(refresh, 4000);
+    </script>
+  </body>
+</html>
