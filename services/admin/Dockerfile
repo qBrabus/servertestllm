@@ -1,9 +1,9 @@
 # 1) Build React
 FROM node:20-alpine AS webbuild
 WORKDIR /webui
-COPY webui/package.json webui/package-lock.json ./
-RUN npm ci
-COPY webui/ ./
+COPY web-frontend/package.json web-frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web-frontend/ ./
 RUN npm run build
 
 # 2) Python API + static serving
