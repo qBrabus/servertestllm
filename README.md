@@ -28,7 +28,7 @@ Use the helper script to build the unified image (default tag `unified-inference
 The build performs the following steps:
 
 1. Installs frontend dependencies and generates a production build of the React dashboard.
-2. Installs the Python backend dependencies (FastAPI, vLLM, NVIDIA NeMo, Pyannote, etc.).
+2. Installs the Python backend dependencies (FastAPI, vLLM, Transformers, Pyannote, etc.).
 3. Bundles both layers into a CUDA 12.4 runtime image with FFmpeg and audio prerequisites.
 
 ## Running the Stack

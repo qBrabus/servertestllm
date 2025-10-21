@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 import os
-import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
@@ -11,7 +10,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 import torch
-from nemo.collections.asr.models import ASRModel
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
 from .base import BaseModelWrapper, ModelMetadata
 
@@ -27,31 +26,40 @@ class CanaryASRModel(BaseModelWrapper):
             format="wav/ogg/flac",
         )
         super().__init__(metadata, cache_dir, hf_token)
-        self.model: ASRModel | None = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._pipeline: Any | None = None
 
     async def load(self) -> None:
         def _load():
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
-            self.model = ASRModel.from_pretrained(
-                model_name=self.model_id,
-                map_location=self.device,
-                override_config_path=None,
-                return_config=False,
-                strict=False,
+            torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+            model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                self.model_id,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+                use_safetensors=True,
                 cache_dir=str(self.cache_dir),
-                auth_token=auth_token,
+                token=auth_token,
             )
-            self.model.eval()
-            if torch.cuda.is_available():
-                self.model = self.model.to(self.device)
+            processor = AutoProcessor.from_pretrained(
+                self.model_id,
+                cache_dir=str(self.cache_dir),
+                token=auth_token,
+            )
+            device = 0 if torch.cuda.is_available() else -1
+            self._pipeline = pipeline(
+                task="automatic-speech-recognition",
+                model=model,
+                tokenizer=processor.tokenizer,
+                feature_extractor=processor.feature_extractor,
+                torch_dtype=torch_dtype,
+                device=device,
+            )
 
         await asyncio.to_thread(_load)
 
     async def _unload(self) -> None:
         def _cleanup():
-            if self.model is not None:
-                self.model = None
+            self._pipeline = None
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -67,10 +75,13 @@ class CanaryASRModel(BaseModelWrapper):
                 audio_array = audio_array.mean(axis=1)
             if sr != target_sr:
                 audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=target_sr)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                sf.write(tmp.name, audio_array, target_sr)
-                transcript = self.model.transcribe(paths2audio_files=[tmp.name])[0]
-            Path(tmp.name).unlink(missing_ok=True)
+            if self._pipeline is None:
+                raise RuntimeError("Canary ASR pipeline is not loaded")
+            if audio_array.size == 0:
+                return {"text": "", "sampling_rate": target_sr}
+            audio_array = audio_array.astype(np.float32)
+            result = self._pipeline({"array": audio_array, "sampling_rate": target_sr})
+            transcript = result.get("text", "") if isinstance(result, dict) else ""
             return {"text": transcript, "sampling_rate": target_sr}
 
         return await asyncio.to_thread(_run)
