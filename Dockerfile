@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
-RUN python3 -m pip install --upgrade pip setuptools wheel && \
+RUN python3 -m pip install --upgrade "pip<24.3" setuptools wheel && \
     python3 -m pip install Cython==0.29.37 && \
     python3 -m pip install typing_extensions==4.11.0 && \
     python3 -m pip install --no-deps numpy==1.26.4 && \
