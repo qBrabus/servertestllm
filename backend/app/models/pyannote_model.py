@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -10,8 +11,11 @@ from typing import Any, Dict, List
 from .base import BaseModelWrapper, ModelMetadata
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class PyannoteDiarizationModel(BaseModelWrapper):
-    model_id = "pyannote/speaker-diarization-community-1/"
+    model_id = "pyannote/speaker-diarization-community-1"
 
     def __init__(self, cache_dir: Path, hf_token: str | None = None):
         metadata = ModelMetadata(
@@ -37,7 +41,14 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             if torch.cuda.is_available():
                 target_gpu = self.primary_device() or 0
-                self.pipeline.to(torch.device("cuda", target_gpu))
+                try:
+                    self.pipeline.to(torch.device("cuda", target_gpu))
+                except Exception as exc:  # pragma: no cover - best-effort fallback
+                    LOGGER.warning(
+                        "Failed to move pyannote pipeline to CUDA device %s, falling back to CPU: %s",
+                        target_gpu,
+                        exc,
+                    )
 
         await asyncio.to_thread(_load)
 

@@ -16,6 +16,7 @@ numba
 cmake
 onnx
 pyannote.audio
+nemo_toolkit[asr]
 vllm
 huggingface-hub
 uvloop

@@ -30,60 +30,32 @@ class CanaryASRModel(BaseModelWrapper):
     async def load(self) -> None:
         def _load():
             import torch
-            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+            from huggingface_hub import hf_hub_download
+            from nemo.collections.asr.models import ASRModel
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
-            torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
             primary_gpu = self.primary_device()
 
-            model_load_kwargs = {
-                "torch_dtype": torch_dtype,
-                "low_cpu_mem_usage": True,
-                "cache_dir": str(self.cache_dir),
-                "token": auth_token,
-            }
+            if torch.cuda.is_available():
+                device_index = primary_gpu if primary_gpu is not None else 0
+                target_device = torch.device("cuda", device_index)
+            else:
+                target_device = torch.device("cpu")
 
-            try:
-                # Canary checkpoints are published as safetensors. Prefer them as they
-                # are both safer and the only files available on Hugging Face Hub.
-                model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                    self.model_id,
-                    use_safetensors=True,
-                    **model_load_kwargs,
-                )
-            except OSError as exc:
-                # Older versions of the model wrapper expected .bin checkpoints.
-                # In environments where safetensors are not available, fall back to
-                # the legacy format to preserve backwards compatibility.
-                if "does not appear to have a file" not in str(exc):
-                    raise
-                model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                    self.model_id,
-                    use_safetensors=False,
-                    **model_load_kwargs,
-                )
-
-            processor = AutoProcessor.from_pretrained(
-                self.model_id,
+            nemo_path = hf_hub_download(
+                repo_id=self.model_id,
+                filename="canary-1b-v2.nemo",
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
             )
 
-            if torch.cuda.is_available():
-                target_device_idx = primary_gpu if primary_gpu is not None else 0
-                model = model.to(torch.device("cuda", target_device_idx))
-                pipeline_device: int | str | torch.device = target_device_idx
-            else:
-                pipeline_device = -1  # HuggingFace pipeline CPU sentinel
+            model = ASRModel.restore_from(restore_path=nemo_path, map_location=target_device)
 
-            self._pipeline = pipeline(
-                task="automatic-speech-recognition",
-                model=model,
-                tokenizer=processor.tokenizer,
-                feature_extractor=processor.feature_extractor,
-                dtype=torch_dtype,
-                device=pipeline_device,
-            )
+            # Ensure the model runs on the requested device.
+            model = model.to(target_device)
+            model.eval()
+
+            self._pipeline = model
 
         await asyncio.to_thread(_load)
 
@@ -104,20 +76,43 @@ class CanaryASRModel(BaseModelWrapper):
             import librosa
             import numpy as np
             import soundfile as sf
+            import tempfile
 
             target_sr = sampling_rate or 16000
             audio_array, sr = sf.read(io.BytesIO(audio_bytes)) if audio_bytes else (np.array([]), target_sr)
             if audio_array.ndim > 1:
                 audio_array = audio_array.mean(axis=1)
-            if sr != target_sr:
+            if sr != target_sr and audio_array.size > 0:
                 audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=target_sr)
             if self._pipeline is None:
                 raise RuntimeError("Canary ASR pipeline is not loaded")
             if audio_array.size == 0:
                 return {"text": "", "sampling_rate": target_sr}
+
             audio_array = audio_array.astype(np.float32)
-            result = self._pipeline({"array": audio_array, "sampling_rate": target_sr})
-            transcript = result.get("text", "") if isinstance(result, dict) else ""
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                sf.write(tmp_path, audio_array, target_sr)
+
+            try:
+                outputs = self._pipeline.transcribe(
+                    paths2audio_files=[str(tmp_path)],
+                    source_lang="en",
+                    target_lang="en",
+                    batch_size=1,
+                    return_hypotheses=True,
+                )
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+            transcript = ""
+            if outputs:
+                first = outputs[0]
+                if isinstance(first, str):
+                    transcript = first
+                elif hasattr(first, "text"):
+                    transcript = first.text or ""
+
             return {"text": transcript, "sampling_rate": target_sr}
 
         return await asyncio.to_thread(_run)
