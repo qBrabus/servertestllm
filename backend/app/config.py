@@ -4,7 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, List
 
-from pydantic import BaseSettings, Field, field_validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -31,9 +32,7 @@ class Settings(BaseSettings):
 
     frontend_dist: Path = Field(Path("/app/frontend"), env="FRONTEND_DIST")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @field_validator("openai_api_keys", mode="before")
     @classmethod
