@@ -40,7 +40,7 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade "pip<24.3" setuptools wheel && \
     python3 -m pip install Cython==0.29.37 && \
     python3 -m pip install typing_extensions==4.11.0 && \
-    python3 -m pip install --no-deps numpy==1.24.4 && \
+    python3 -m pip install --no-deps numpy==1.23.5 && \
     python3 -m pip install -r /app/requirements.txt
 
 COPY backend /app/backend
