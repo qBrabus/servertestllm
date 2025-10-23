@@ -25,14 +25,30 @@ fi
 
 echo "Launching container ${CONTAINER_NAME} from image ${IMAGE_TAG}..."
 
+docker_args=(
+  --name
+  "${CONTAINER_NAME}"
+  --gpus
+  all
+  -p
+  "${HOST_PORT}:8000"
+  -e
+  "HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}"
+  -e
+  "MODEL_CACHE_DIR=/models"
+  -v
+  "${MODEL_CACHE_DIR}:/models"
+)
+
+if [[ -n "${OPENAI_KEYS}" ]]; then
+  docker_args+=(
+    -e
+    "OPENAI_API_KEYS=${OPENAI_KEYS}"
+  )
+fi
+
 docker run -d \
-  --name "${CONTAINER_NAME}" \
-  --gpus all \
-  -p "${HOST_PORT}:8000" \
-  -e "HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}" \
-  -e "OPENAI_API_KEYS=${OPENAI_KEYS}" \
-  -e "MODEL_CACHE_DIR=/models" \
-  -v "${MODEL_CACHE_DIR}:/models" \
+  "${docker_args[@]}" \
   "${IMAGE_TAG}" \
   "$@"
 
