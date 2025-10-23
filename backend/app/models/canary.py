@@ -35,32 +35,54 @@ class CanaryASRModel(BaseModelWrapper):
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
             primary_gpu = self.primary_device()
-            model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                self.model_id,
-                torch_dtype=torch_dtype,
-                low_cpu_mem_usage=True,
-                use_safetensors=False,
-                cache_dir=str(self.cache_dir),
-                token=auth_token,
-            )
+
+            model_load_kwargs = {
+                "torch_dtype": torch_dtype,
+                "low_cpu_mem_usage": True,
+                "cache_dir": str(self.cache_dir),
+                "token": auth_token,
+            }
+
+            try:
+                # Canary checkpoints are published as safetensors. Prefer them as they
+                # are both safer and the only files available on Hugging Face Hub.
+                model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                    self.model_id,
+                    use_safetensors=True,
+                    **model_load_kwargs,
+                )
+            except OSError as exc:
+                # Older versions of the model wrapper expected .bin checkpoints.
+                # In environments where safetensors are not available, fall back to
+                # the legacy format to preserve backwards compatibility.
+                if "does not appear to have a file" not in str(exc):
+                    raise
+                model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                    self.model_id,
+                    use_safetensors=False,
+                    **model_load_kwargs,
+                )
+
             processor = AutoProcessor.from_pretrained(
                 self.model_id,
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
             )
+
             if torch.cuda.is_available():
                 target_device_idx = primary_gpu if primary_gpu is not None else 0
-                device = f"cuda:{target_device_idx}"
-                model = model.to(device)
+                model = model.to(torch.device("cuda", target_device_idx))
+                pipeline_device: int | str | torch.device = target_device_idx
             else:
-                device = "cpu"
+                pipeline_device = -1  # HuggingFace pipeline CPU sentinel
+
             self._pipeline = pipeline(
                 task="automatic-speech-recognition",
                 model=model,
                 tokenizer=processor.tokenizer,
                 feature_extractor=processor.feature_extractor,
                 dtype=torch_dtype,
-                device=device,
+                device=pipeline_device,
             )
 
         await asyncio.to_thread(_load)

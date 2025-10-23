@@ -25,6 +25,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
     async def load(self) -> None:
         def _load():
+            import torch
             from pyannote.audio import Pipeline
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
@@ -33,6 +34,10 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 use_auth_token=auth_token,
                 cache_dir=str(self.cache_dir),
             )
+
+            if torch.cuda.is_available():
+                target_gpu = self.primary_device() or 0
+                self.pipeline.to(torch.device("cuda", target_gpu))
 
         await asyncio.to_thread(_load)
 
