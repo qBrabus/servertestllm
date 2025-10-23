@@ -41,7 +41,7 @@ export interface ModelStatus {
   loaded: boolean;
   description: string;
   format: string;
-  params?: Record<string, string>;
+  params?: Record<string, unknown>;
 }
 
 export interface DashboardState {
@@ -58,9 +58,19 @@ export const fetchDashboard = async (): Promise<DashboardState> => {
   return data;
 };
 
-export const loadModel = async (key: string): Promise<Record<string, ModelStatus>> => {
+export interface LoadModelPayload {
+  key: string;
+  gpuDeviceIds?: number[];
+}
+
+export const loadModel = async ({
+  key,
+  gpuDeviceIds
+}: LoadModelPayload): Promise<Record<string, ModelStatus>> => {
+  const payload = gpuDeviceIds && gpuDeviceIds.length > 0 ? { gpu_device_ids: gpuDeviceIds } : {};
   const { data } = await apiClient.post<{ models: Record<string, ModelStatus> }>(
-    `/api/admin/models/${key}/load`
+    `/api/admin/models/${key}/load`,
+    payload
   );
   return data.models;
 };

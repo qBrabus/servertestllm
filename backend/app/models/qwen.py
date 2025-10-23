@@ -12,14 +12,19 @@ class QwenModel(BaseModelWrapper):
 
     model_id = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 
-    def __init__(self, cache_dir, hf_token=None):
+    def __init__(
+        self,
+        cache_dir,
+        hf_token=None,
+        preferred_device_ids: list[int] | None = None,
+    ):
         metadata = ModelMetadata(
             identifier=self.model_id,
             task="chat-completion",
             description="Qwen3 VL 30B A3B Instruct model for multimodal chat completions",
             format="chatml",
         )
-        super().__init__(metadata, cache_dir, hf_token)
+        super().__init__(metadata, cache_dir, hf_token, preferred_device_ids)
         self.tokenizer = None
         self.model = None
         self._device = "cpu"
@@ -30,23 +35,29 @@ class QwenModel(BaseModelWrapper):
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+            preferred = self.preferred_device_ids
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_id,
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
                 trust_remote_code=True,
             )
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                dtype = torch.float16
+                device_index = preferred[0] if preferred else 0
+                device = f"cuda:{device_index}"
+            else:
+                dtype = torch.float32
+                device = "cpu"
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_id,
-                torch_dtype=torch.float16,
-                device_map="auto" if torch.cuda.is_available() else None,
+                torch_dtype=dtype,
+                device_map=None,
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
                 trust_remote_code=True,
             )
-            if not torch.cuda.is_available():
-                self.model = self.model.to(device)
+            self.model = self.model.to(device)
             self._device = device
 
         await asyncio.to_thread(_load)
@@ -59,6 +70,7 @@ class QwenModel(BaseModelWrapper):
             self.tokenizer = None
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            self._device = "cpu"
 
         await asyncio.to_thread(_cleanup)
 

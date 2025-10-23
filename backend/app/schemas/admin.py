@@ -28,6 +28,10 @@ class ModelInfo(BaseModel):
     params: Dict[str, object] | None = None
 
 
+class ModelLoadRequest(BaseModel):
+    gpu_device_ids: List[int] | None = None
+
+
 class RegistryStatus(BaseModel):
     models: Dict[str, ModelInfo]
 

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..schemas.admin import DashboardState, GPUInfo, ModelInfo, RegistryStatus, SystemMetrics
+from ..schemas.admin import (
+    DashboardState,
+    GPUInfo,
+    ModelInfo,
+    ModelLoadRequest,
+    RegistryStatus,
+    SystemMetrics,
+)
 from ..services.gpu_monitor import gpu_monitor
 from ..services.model_registry import registry
 
@@ -44,9 +51,10 @@ async def get_status() -> DashboardState:
 
 
 @router.post("/models/{model_key}/load")
-async def load_model(model_key: str) -> RegistryStatus:
+async def load_model(model_key: str, payload: ModelLoadRequest | None = None) -> RegistryStatus:
     try:
-        await registry.ensure_loaded(model_key)
+        device_ids = payload.gpu_device_ids if payload else None
+        await registry.ensure_loaded(model_key, device_ids=device_ids)
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown model")
     return RegistryStatus(models=await _collect_model_info())
