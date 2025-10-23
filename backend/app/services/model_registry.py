@@ -106,8 +106,12 @@ class ModelRegistry:
             raise KeyError(f"No model registered for task: {task}")
         return await self.get(key)
 
-    async def ensure_loaded(self, key: str) -> None:
+    async def ensure_loaded(self, key: str, device_ids: Optional[List[int]] = None) -> None:
         model = await self.get(key)
+        if device_ids is not None:
+            preferences_changed = model.update_device_preferences(device_ids)
+            if preferences_changed and model.is_loaded:
+                await model.unload()
         await model.ensure_loaded()
 
     async def unload(self, key: str) -> None:
@@ -125,13 +129,16 @@ class ModelRegistry:
             for key, slot in self._slots.items():
                 model = slot.instance
                 metadata = slot.metadata
+                params = dict(metadata.params)
+                if model:
+                    params["device_ids"] = model.preferred_device_ids
                 result[key] = ModelStatus(
                     identifier=metadata.identifier,
                     task=metadata.task,
                     loaded=model.is_loaded if model else False,
                     description=metadata.description,
                     format=metadata.format,
-                    params=metadata.params,
+                    params=params,
                 )
         return result
 

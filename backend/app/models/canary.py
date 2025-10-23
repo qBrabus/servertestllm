@@ -12,14 +12,19 @@ from .base import BaseModelWrapper, ModelMetadata
 class CanaryASRModel(BaseModelWrapper):
     model_id = "nvidia/canary-1b-v2"
 
-    def __init__(self, cache_dir: Path, hf_token: str | None = None):
+    def __init__(
+        self,
+        cache_dir: Path,
+        hf_token: str | None = None,
+        preferred_device_ids: list[int] | None = None,
+    ):
         metadata = ModelMetadata(
             identifier=self.model_id,
             task="speech-to-text",
             description="NVIDIA Canary multilingual ASR model",
             format="wav/ogg/flac",
         )
-        super().__init__(metadata, cache_dir, hf_token)
+        super().__init__(metadata, cache_dir, hf_token, preferred_device_ids)
         self._pipeline: Any | None = None
 
     async def load(self) -> None:
@@ -29,11 +34,12 @@ class CanaryASRModel(BaseModelWrapper):
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+            primary_gpu = self.primary_device()
             model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 self.model_id,
                 torch_dtype=torch_dtype,
                 low_cpu_mem_usage=True,
-                use_safetensors=True,
+                use_safetensors=False,
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
             )
@@ -42,13 +48,18 @@ class CanaryASRModel(BaseModelWrapper):
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
             )
-            device = 0 if torch.cuda.is_available() else -1
+            if torch.cuda.is_available():
+                target_device_idx = primary_gpu if primary_gpu is not None else 0
+                device = f"cuda:{target_device_idx}"
+                model = model.to(device)
+            else:
+                device = "cpu"
             self._pipeline = pipeline(
                 task="automatic-speech-recognition",
                 model=model,
                 tokenizer=processor.tokenizer,
                 feature_extractor=processor.feature_extractor,
-                torch_dtype=torch_dtype,
+                dtype=torch_dtype,
                 device=device,
             )
 
