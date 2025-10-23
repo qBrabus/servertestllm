@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 import psutil
-import torch
-import GPUtil
 
 
 @dataclass
@@ -45,8 +43,16 @@ class GPUMonitor:
             self._thread.join(timeout=1)
 
     def _collect(self) -> None:
+        try:
+            import torch
+        except Exception:
+            self._data = {}
+            return
+
         if torch.cuda.is_available():
             try:
+                import GPUtil
+
                 gpus = GPUtil.getGPUs()
             except Exception:
                 self._data = {}

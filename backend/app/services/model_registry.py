@@ -3,12 +3,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
-from ..models.base import BaseModelWrapper
-from ..models.canary import CanaryASRModel
-from ..models.pyannote_model import PyannoteDiarizationModel
-from ..models.qwen import QwenModel
+from ..models.base import BaseModelWrapper, ModelMetadata
 
 
 @dataclass
@@ -21,9 +18,18 @@ class ModelStatus:
     params: dict = field(default_factory=dict)
 
 
+@dataclass
+class ModelSlot:
+    """Holds the factory and runtime state for a registered model."""
+
+    metadata: ModelMetadata
+    factory: Callable[[], BaseModelWrapper]
+    instance: BaseModelWrapper | None = None
+
+
 class ModelRegistry:
     def __init__(self) -> None:
-        self._models: Dict[str, BaseModelWrapper] = {}
+        self._slots: Dict[str, ModelSlot] = {}
         self._task_index: Dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._cache_dir = Path("/models")
@@ -36,25 +42,63 @@ class ModelRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
-        self._models = {
-            "qwen": QwenModel(cache_dir=self._cache_dir, hf_token=self._hf_token),
-            "canary": CanaryASRModel(cache_dir=self._cache_dir, hf_token=self._hf_token),
-            "pyannote": PyannoteDiarizationModel(cache_dir=self._cache_dir, hf_token=self._hf_token),
+        def _qwen_factory() -> BaseModelWrapper:
+            from ..models.qwen import QwenModel
+
+            return QwenModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+
+        def _canary_factory() -> BaseModelWrapper:
+            from ..models.canary import CanaryASRModel
+
+            return CanaryASRModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+
+        def _pyannote_factory() -> BaseModelWrapper:
+            from ..models.pyannote_model import PyannoteDiarizationModel
+
+            return PyannoteDiarizationModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+
+        self._slots = {
+            "qwen": ModelSlot(
+                metadata=ModelMetadata(
+                    identifier="Qwen/Qwen3-VL-30B-A3B-Instruct",
+                    task="chat-completion",
+                    description="Qwen3 VL 30B A3B Instruct model for multimodal chat completions",
+                    format="chatml",
+                ),
+                factory=_qwen_factory,
+            ),
+            "canary": ModelSlot(
+                metadata=ModelMetadata(
+                    identifier="nvidia/canary-1b-v2",
+                    task="speech-to-text",
+                    description="NVIDIA Canary multilingual ASR model",
+                    format="wav/ogg/flac",
+                ),
+                factory=_canary_factory,
+            ),
+            "pyannote": ModelSlot(
+                metadata=ModelMetadata(
+                    identifier="pyannote/speaker-diarization-community-1/",
+                    task="speaker-diarization",
+                    description="Pyannote diarization community pipeline",
+                    format="wav/ogg/flac",
+                ),
+                factory=_pyannote_factory,
+            ),
         }
-        self._task_index = {
-            "chat-completion": "qwen",
-            "speech-to-text": "canary",
-            "speaker-diarization": "pyannote",
-        }
+        self._task_index = {slot.metadata.task: key for key, slot in self._slots.items()}
 
     def keys(self) -> List[str]:
-        return list(self._models.keys())
+        return list(self._slots.keys())
 
     async def get(self, key: str) -> BaseModelWrapper:
         async with self._lock:
-            if key not in self._models:
+            slot = self._slots.get(key)
+            if slot is None:
                 raise KeyError(f"Unknown model key: {key}")
-            return self._models[key]
+            if slot.instance is None:
+                slot.instance = slot.factory()
+            return slot.instance
 
     async def get_by_task(self, task: str) -> BaseModelWrapper:
         key = self._task_index.get(task)
@@ -67,18 +111,24 @@ class ModelRegistry:
         await model.ensure_loaded()
 
     async def unload(self, key: str) -> None:
-        model = await self.get(key)
-        await model.unload()
+        async with self._lock:
+            slot = self._slots.get(key)
+            if slot is None:
+                raise KeyError(f"Unknown model key: {key}")
+            model = slot.instance
+        if model:
+            await model.unload()
 
     async def status(self) -> Dict[str, ModelStatus]:
         result: Dict[str, ModelStatus] = {}
         async with self._lock:
-            for key, model in self._models.items():
-                metadata = model.metadata
+            for key, slot in self._slots.items():
+                model = slot.instance
+                metadata = slot.metadata
                 result[key] = ModelStatus(
                     identifier=metadata.identifier,
                     task=metadata.task,
-                    loaded=model.is_loaded,
+                    loaded=model.is_loaded if model else False,
                     description=metadata.description,
                     format=metadata.format,
                     params=metadata.params,
@@ -87,8 +137,9 @@ class ModelRegistry:
 
     async def shutdown(self) -> None:
         async with self._lock:
-            for model in self._models.values():
-                if model.is_loaded:
+            for slot in self._slots.values():
+                model = slot.instance
+                if model and model.is_loaded:
                     await model.unload()
 
 

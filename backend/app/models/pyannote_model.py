@@ -7,10 +7,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
-import librosa
-import soundfile as sf
-from pyannote.audio import Pipeline
-
 from .base import BaseModelWrapper, ModelMetadata
 
 
@@ -29,6 +25,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
     async def load(self) -> None:
         def _load():
+            from pyannote.audio import Pipeline
+
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             self.pipeline = Pipeline.from_pretrained(
                 self.model_id,
@@ -48,6 +46,9 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         await self.ensure_loaded()
 
         def _run() -> Dict[str, Any]:
+            import librosa
+            import soundfile as sf
+
             target_sr = sampling_rate or 16000
             audio_array, sr = sf.read(io.BytesIO(audio_bytes))
             if audio_array.ndim > 1:

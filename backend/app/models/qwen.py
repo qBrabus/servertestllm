@@ -4,9 +4,6 @@ import asyncio
 import os
 from typing import Any, Dict, List
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 from .base import BaseModelWrapper, ModelMetadata
 
 
@@ -25,10 +22,13 @@ class QwenModel(BaseModelWrapper):
         super().__init__(metadata, cache_dir, hf_token)
         self.tokenizer = None
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._device = "cpu"
 
     async def load(self) -> None:
         def _load():
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_id,
@@ -36,6 +36,7 @@ class QwenModel(BaseModelWrapper):
                 token=auth_token,
                 trust_remote_code=True,
             )
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_id,
                 torch_dtype=torch.float16,
@@ -45,12 +46,15 @@ class QwenModel(BaseModelWrapper):
                 trust_remote_code=True,
             )
             if not torch.cuda.is_available():
-                self.model = self.model.to(self.device)
+                self.model = self.model.to(device)
+            self._device = device
 
         await asyncio.to_thread(_load)
 
     async def _unload(self) -> None:
         def _cleanup():
+            import torch
+
             self.model = None
             self.tokenizer = None
             if torch.cuda.is_available():
@@ -62,6 +66,8 @@ class QwenModel(BaseModelWrapper):
         await self.ensure_loaded()
 
         def _run() -> Dict[str, Any]:
+            import torch
+
             prompt = self._build_prompt(messages)
             inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             generation_config = dict(
@@ -85,3 +91,7 @@ class QwenModel(BaseModelWrapper):
             history.append(f"[{role.upper()}]: {content}")
         history.append("[ASSISTANT]:")
         return "\n".join(history)
+
+    @property
+    def device(self) -> str:
+        return self._device

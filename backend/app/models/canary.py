@@ -6,12 +6,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-import librosa
-import numpy as np
-import soundfile as sf
-import torch
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-
 from .base import BaseModelWrapper, ModelMetadata
 
 
@@ -30,6 +24,9 @@ class CanaryASRModel(BaseModelWrapper):
 
     async def load(self) -> None:
         def _load():
+            import torch
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
             model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -59,6 +56,8 @@ class CanaryASRModel(BaseModelWrapper):
 
     async def _unload(self) -> None:
         def _cleanup():
+            import torch
+
             self._pipeline = None
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -69,6 +68,10 @@ class CanaryASRModel(BaseModelWrapper):
         await self.ensure_loaded()
 
         def _run() -> Dict[str, Any]:
+            import librosa
+            import numpy as np
+            import soundfile as sf
+
             target_sr = sampling_rate or 16000
             audio_array, sr = sf.read(io.BytesIO(audio_bytes)) if audio_bytes else (np.array([]), target_sr)
             if audio_array.ndim > 1:
