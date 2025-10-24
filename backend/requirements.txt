@@ -1,5 +1,6 @@
 Cython
-numpy
+numpy>=1.23
+h5py>=3.10
 fastapi
 uvicorn
 pydantic
