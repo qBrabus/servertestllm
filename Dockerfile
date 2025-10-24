@@ -15,8 +15,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     HUGGINGFACE_HUB_CACHE=/models
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    apt-utils \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends apt-utils && \
+    apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \

@@ -107,6 +107,13 @@ export const loadModel = async ({
   return data.models;
 };
 
+export const downloadModel = async (key: string): Promise<Record<string, ModelStatus>> => {
+  const { data } = await apiClient.post<{ models: Record<string, ModelStatus> }>(
+    `/api/admin/models/${key}/download`
+  );
+  return data.models;
+};
+
 export const unloadModel = async (key: string): Promise<Record<string, ModelStatus>> => {
   const { data } = await apiClient.post<{ models: Record<string, ModelStatus> }>(
     `/api/admin/models/${key}/unload`

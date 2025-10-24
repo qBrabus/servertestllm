@@ -53,7 +53,7 @@ Le script `build_docker.sh` orchestre la construction multi-étapes (frontend pu
 ./build_docker.sh mon-image:latest
 ```
 
-Le `Dockerfile` s'appuie sur `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`, installe Node 20 pour le frontend, puis FastAPI/vLLM/NeMo/Pyannote côté backend avec les roues CUDA fournies par NVIDIA.
+Le `Dockerfile` s'appuie sur `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`, installe Node 20 pour le frontend, puis FastAPI/vLLM/NeMo/Pyannote côté backend avec les roues CUDA fournies par NVIDIA. L'étape système installe désormais `apt-utils` en amont afin d'éviter l'avertissement `debconf: delaying package configuration` lors des builds.
 
 ### Exécution
 
@@ -76,13 +76,21 @@ Variables d'environnement principales (à exporter avant l'exécution si nécess
 - **API OpenAI** : `http://<hôte>:<port>/v1/chat/completions` et `/v1/completions`
 - **Transcription audio** : `http://<hôte>:<port>/api/audio/transcribe`
 - **Diarisation** : `http://<hôte>:<port>/api/diarization/process`
-- **Administration** : `GET /api/admin/status`, `POST /api/admin/models/{clé}/load`, `POST /api/admin/models/{clé}/unload`
+- **Administration** : `GET /api/admin/status`, `POST /api/admin/models/{clé}/download`, `POST /api/admin/models/{clé}/load`, `POST /api/admin/models/{clé}/unload`
 
 Clés modèles disponibles :
 
 - `qwen` — LLM multimodal (vLLM)
 - `canary` — ASR NeMo
 - `pyannote` — Diarisation
+
+Chaque carte du tableau de bord propose désormais trois actions distinctes :
+
+- **Télécharger** : récupère les poids Hugging Face sans initialiser le runtime (utile pour préparer le cache hors ligne).
+- **Charger** : initialise le modèle sur GPU en réutilisant les poids présents dans le cache local.
+- **Décharger** : libère la mémoire GPU occupée par le modèle.
+
+La sélection des GPU a été améliorée : la liste déroulante affiche maintenant des cases à cocher pour visualiser rapidement les cartes choisies et permet de conserver le menu ouvert pour sélectionner plusieurs GPU d'affilée.
 
 ## Notes techniques
 
