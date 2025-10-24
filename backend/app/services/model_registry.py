@@ -149,6 +149,10 @@ class ModelRegistry:
                 await model.unload()
         await model.ensure_loaded()
 
+    async def ensure_downloaded(self, key: str) -> None:
+        model = await self.get(key)
+        await model.ensure_downloaded()
+
     async def unload(self, key: str) -> None:
         async with self._lock:
             slot = self._slots.get(key)

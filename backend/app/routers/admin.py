@@ -64,6 +64,15 @@ async def load_model(model_key: str, payload: ModelLoadRequest | None = None) ->
     return RegistryStatus(models=await _collect_model_info())
 
 
+@router.post("/models/{model_key}/download")
+async def download_model(model_key: str) -> RegistryStatus:
+    try:
+        await registry.ensure_downloaded(model_key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    return RegistryStatus(models=await _collect_model_info())
+
+
 @router.post("/models/{model_key}/unload")
 async def unload_model(model_key: str) -> RegistryStatus:
     try:

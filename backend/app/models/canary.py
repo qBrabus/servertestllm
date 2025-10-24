@@ -31,7 +31,6 @@ class CanaryASRModel(BaseModelWrapper):
         def _load():
             import torch
             import huggingface_hub
-            from huggingface_hub import snapshot_download
 
             if not hasattr(huggingface_hub, "ModelFilter"):
                 class _ModelFilter:  # pragma: no cover - compatibility shim
@@ -66,26 +65,8 @@ class CanaryASRModel(BaseModelWrapper):
                 details={"preferred_device_ids": self.preferred_device_ids},
             )
 
-            def _progress_callback(progress):  # pragma: no cover - executed in thread
-                total = getattr(progress, "total", None)
-                current = getattr(progress, "current", None)
-                file = getattr(progress, "file", "")
-                if total and total > 0 and current is not None:
-                    ratio = current / float(total)
-                    percent = 15 + int(ratio * 55)
-                    self.update_runtime(
-                        progress=min(80, percent),
-                        status=f"Downloading {Path(file).name}" if file else "Downloading model",
-                    )
-
-            repo_path = snapshot_download(
-                repo_id=self.model_id,
-                cache_dir=str(self.cache_dir),
-                token=auth_token,
-                allow_patterns=["*.nemo"],
-                local_dir_use_symlinks=False,
-                progress_callback=_progress_callback,
-            )
+            self.update_runtime(progress=40, status="Downloading Canary checkpoint")
+            repo_path = self._download_repo(auth_token)
 
             nemo_path = Path(repo_path) / "canary-1b-v2.nemo"
             if not nemo_path.exists():
@@ -108,6 +89,27 @@ class CanaryASRModel(BaseModelWrapper):
             )
 
         await asyncio.to_thread(_load)
+
+    def _download_repo(self, auth_token: str | None) -> Path:
+        from huggingface_hub import snapshot_download
+
+        repo_path = snapshot_download(
+            repo_id=self.model_id,
+            cache_dir=str(self.cache_dir),
+            token=auth_token,
+            allow_patterns=["*.nemo"],
+            local_dir_use_symlinks=False,
+        )
+        return Path(repo_path)
+
+    async def download(self) -> None:
+        def _download():
+            auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+            self.update_runtime(progress=40, status="Téléchargement du modèle Canary")
+            self._download_repo(auth_token)
+            self.update_runtime(progress=95, status="Checkpoint Canary en cache", downloaded=True)
+
+        await asyncio.to_thread(_download)
 
     async def _unload(self) -> None:
         def _cleanup():

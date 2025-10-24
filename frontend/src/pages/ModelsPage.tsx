@@ -20,6 +20,7 @@ import {
   CardActions,
   CardContent,
   CardHeader,
+  Checkbox,
   Chip,
   Collapse,
   Divider,
@@ -50,6 +51,7 @@ import heroLogo from "../assets/unified-logo.svg";
 import {
   HuggingFaceTokenStatus,
   ModelRuntimeInfo,
+  downloadModel,
   fetchHuggingFaceTokenStatus,
   loadModel,
   unloadModel,
@@ -146,6 +148,11 @@ const ModelsPage = () => {
 
   const loadMutation = useMutation({
     mutationFn: loadModel,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: downloadModel,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
   });
 
@@ -415,6 +422,7 @@ const ModelsPage = () => {
             const serverEntries = runtime?.server ? Object.entries(runtime.server) : [];
             const detailEntries = runtime?.details ? Object.entries(runtime.details) : [];
             const isLoadingAction = loadMutation.isPending && loadMutation.variables?.key === key;
+            const isDownloadingAction = downloadMutation.isPending && downloadMutation.variables === key;
             const isUnloadingAction = unloadMutation.isPending && unloadMutation.variables === key;
             const statusMessage = runtime?.status ?? (model.loaded ? "Modèle prêt" : "Pas encore chargé");
 
@@ -560,9 +568,19 @@ const ModelsPage = () => {
                   <CardActions sx={{ px: 3, pb: 3 }}>
                     <LoadingButton
                       size="small"
+                      variant="outlined"
+                      onClick={() => downloadMutation.mutate(key)}
+                      disabled={downloaded || runtime?.state === "loading" || isLoadingAction}
+                      loading={isDownloadingAction}
+                      startIcon={<CloudDownloadRoundedIcon />}
+                    >
+                      Télécharger
+                    </LoadingButton>
+                    <LoadingButton
+                      size="small"
                       variant="contained"
                       onClick={() => loadMutation.mutate({ key, gpuDeviceIds: selectedDevices[key] })}
-                      disabled={model.loaded || runtime?.state === "loading"}
+                      disabled={model.loaded || runtime?.state === "loading" || isDownloadingAction}
                       loading={isLoadingAction}
                       startIcon={<PlayArrowRoundedIcon />}
                     >
@@ -573,7 +591,7 @@ const ModelsPage = () => {
                       variant="outlined"
                       color="warning"
                       onClick={() => unloadMutation.mutate(key)}
-                      disabled={!model.loaded || runtime?.state === "loading"}
+                      disabled={!model.loaded || runtime?.state === "loading" || isDownloadingAction}
                       loading={isUnloadingAction}
                       startIcon={<WarningAmberRoundedIcon />}
                     >
@@ -592,6 +610,7 @@ const ModelsPage = () => {
                         backgroundColor: alpha(theme.palette.background.paper, 0.6),
                         borderRadius: 2
                       }}
+                      MenuProps={{ disableCloseOnSelect: true }}
                       renderValue={(selected) =>
                         selected.length === 0
                           ? "GPU auto"
@@ -604,9 +623,9 @@ const ModelsPage = () => {
                         <MenuItem
                           key={gpu.id}
                           value={String(gpu.id)}
-                          selected={selectedForModel.includes(gpu.id)}
                         >
-                          GPU {gpu.id} ({gpu.name})
+                          <Checkbox checked={selectedForModel.includes(gpu.id)} />
+                          <ListItemText primary={`GPU ${gpu.id} (${gpu.name})`} />
                         </MenuItem>
                       ))}
                     </Select>

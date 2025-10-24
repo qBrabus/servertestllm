@@ -101,6 +101,45 @@ class BaseModelWrapper(ABC):
                             downloaded=True,
                         )
 
+    async def ensure_downloaded(self) -> None:
+        if self.is_downloaded():
+            return
+        async with self._lock:
+            if self.is_downloaded():
+                return
+            previous_state = self.runtime_status().get("state", "idle")
+            was_loaded = self._is_loaded
+            self.update_runtime(
+                state="loading" if not was_loaded else previous_state,
+                progress=5,
+                status="Downloading model artifacts",
+                downloaded=False,
+            )
+            try:
+                await self.download()
+            except Exception as exc:
+                self.update_runtime(
+                    state=previous_state if was_loaded else "error",
+                    status=f"Download failed: {exc}",
+                    progress=0,
+                    last_error=str(exc),
+                )
+                raise
+            else:
+                if was_loaded:
+                    self.update_runtime(
+                        state=previous_state,
+                        status="Model ready",
+                        downloaded=True,
+                    )
+                else:
+                    self.update_runtime(
+                        state="idle",
+                        status="Model cached",
+                        progress=0,
+                        downloaded=True,
+                    )
+
     async def unload(self) -> None:
         async with self._lock:
             await self._unload()
@@ -115,6 +154,10 @@ class BaseModelWrapper(ABC):
 
     @abstractmethod
     async def load(self) -> None:
+        ...
+
+    @abstractmethod
+    async def download(self) -> None:
         ...
 
     @abstractmethod

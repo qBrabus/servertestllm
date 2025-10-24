@@ -36,7 +36,6 @@ class QwenModel(BaseModelWrapper):
             import torch
             from transformers import AutoTokenizer
             from vllm import AsyncEngineArgs, AsyncLLMEngine
-            from huggingface_hub import snapshot_download
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger Qwen avec vLLM")
@@ -69,13 +68,8 @@ class QwenModel(BaseModelWrapper):
                     },
                 )
 
-                download_root = snapshot_download(
-                    repo_id=self.model_id,
-                    cache_dir=str(self.cache_dir),
-                    token=auth_token,
-                    local_dir_use_symlinks=False,
-                    progress_callback=self._on_download_progress,
-                )
+                self.update_runtime(progress=35, status="Downloading Qwen weights")
+                download_root = self._download_repo(auth_token)
 
                 model_path = Path(download_root)
                 self.update_runtime(progress=55, status="Loading tokenizer", downloaded=True)
@@ -122,17 +116,25 @@ class QwenModel(BaseModelWrapper):
 
         await asyncio.to_thread(_load)
 
-    def _on_download_progress(self, progress) -> None:
-        total = getattr(progress, "total", None)
-        current = getattr(progress, "current", None)
-        file = getattr(progress, "file", "")
-        if total and total > 0 and current is not None:
-            ratio = current / float(total)
-            percent = 15 + int(ratio * 35)
-            self.update_runtime(
-                progress=min(50, percent),
-                status=f"Downloading {Path(file).name}" if file else "Downloading model shards",
-            )
+    def _download_repo(self, auth_token: str | None) -> Path:
+        from huggingface_hub import snapshot_download
+
+        download_root = snapshot_download(
+            repo_id=self.model_id,
+            cache_dir=str(self.cache_dir),
+            token=auth_token,
+            local_dir_use_symlinks=False,
+        )
+        return Path(download_root)
+
+    async def download(self) -> None:
+        def _download():
+            auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+            self.update_runtime(progress=35, status="Téléchargement des poids Qwen")
+            self._download_repo(auth_token)
+            self.update_runtime(progress=55, status="Poids Qwen mis en cache", downloaded=True)
+
+        await asyncio.to_thread(_download)
 
     async def _unload(self) -> None:
         if self._engine is not None:
