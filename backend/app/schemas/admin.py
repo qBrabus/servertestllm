@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -19,6 +20,17 @@ class SystemMetrics(BaseModel):
     memory_percent: float
 
 
+class ModelRuntimeInfo(BaseModel):
+    state: Literal["idle", "loading", "ready", "error"]
+    progress: int
+    status: str
+    details: Dict[str, object] | None = None
+    server: Dict[str, object] | None = None
+    downloaded: bool = False
+    last_error: str | None = None
+    updated_at: datetime | None = None
+
+
 class ModelInfo(BaseModel):
     identifier: str
     task: str
@@ -26,6 +38,7 @@ class ModelInfo(BaseModel):
     description: str
     format: str
     params: Dict[str, object] | None = None
+    runtime: Optional[ModelRuntimeInfo] = None
 
 
 class ModelLoadRequest(BaseModel):

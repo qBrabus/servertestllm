@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -17,6 +18,7 @@ class ModelStatus:
     description: str
     format: str
     params: dict = field(default_factory=dict)
+    runtime: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -165,6 +167,22 @@ class ModelRegistry:
                 params = dict(metadata.params)
                 if model:
                     params["device_ids"] = model.preferred_device_ids
+                    runtime = model.runtime_status()
+                else:
+                    params["device_ids"] = params.get("device_ids") or []
+                    cache_dir = BaseModelWrapper.compute_cache_repo_dir(
+                        self._cache_dir, metadata.identifier
+                    )
+                    runtime = {
+                        "state": "idle",
+                        "progress": 0,
+                        "status": "Not loaded",
+                        "details": {"preferred_device_ids": []},
+                        "server": None,
+                        "last_error": None,
+                        "downloaded": cache_dir.exists(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
                 result[key] = ModelStatus(
                     identifier=metadata.identifier,
                     task=metadata.task,
@@ -172,6 +190,7 @@ class ModelRegistry:
                     description=metadata.description,
                     format=metadata.format,
                     params=params,
+                    runtime=runtime,
                 )
         return result
 

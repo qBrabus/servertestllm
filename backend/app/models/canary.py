@@ -31,6 +31,7 @@ class CanaryASRModel(BaseModelWrapper):
         def _load():
             import torch
             import huggingface_hub
+            from huggingface_hub import snapshot_download
 
             if not hasattr(huggingface_hub, "ModelFilter"):
                 class _ModelFilter:  # pragma: no cover - compatibility shim
@@ -49,7 +50,6 @@ class CanaryASRModel(BaseModelWrapper):
                     all_values.add("ModelFilter")
                     huggingface_hub.__all__ = tuple(all_values)  # type: ignore[assignment]
 
-            from huggingface_hub import hf_hub_download
             from nemo.collections.asr.models import ASRModel
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
@@ -60,19 +60,52 @@ class CanaryASRModel(BaseModelWrapper):
             device_index = primary_gpu if primary_gpu is not None else 0
             torch.cuda.set_device(device_index)
             target_device = torch.device("cuda", device_index)
+            self.update_runtime(
+                progress=15,
+                status="Preparing ASR weights",
+                details={"preferred_device_ids": self.preferred_device_ids},
+            )
 
-            nemo_path = hf_hub_download(
+            def _progress_callback(progress):  # pragma: no cover - executed in thread
+                total = getattr(progress, "total", None)
+                current = getattr(progress, "current", None)
+                file = getattr(progress, "file", "")
+                if total and total > 0 and current is not None:
+                    ratio = current / float(total)
+                    percent = 15 + int(ratio * 55)
+                    self.update_runtime(
+                        progress=min(80, percent),
+                        status=f"Downloading {Path(file).name}" if file else "Downloading model",
+                    )
+
+            repo_path = snapshot_download(
                 repo_id=self.model_id,
-                filename="canary-1b-v2.nemo",
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
+                allow_patterns=["*.nemo"],
+                local_dir_use_symlinks=False,
+                progress_callback=_progress_callback,
             )
+
+            nemo_path = Path(repo_path) / "canary-1b-v2.nemo"
+            if not nemo_path.exists():
+                raise FileNotFoundError(f"Fichier Nemo introuvable dans {repo_path}")
+            self.update_runtime(progress=85, status="Restoring NeMo checkpoint", downloaded=True)
 
             model = ASRModel.restore_from(restore_path=nemo_path, map_location=target_device)
             model = model.to(target_device)
             model.eval()
 
             self._pipeline = model
+            self.update_runtime(
+                progress=95,
+                status="Canary ready",
+                server={
+                    "type": "NeMo ASR",
+                    "endpoint": "/api/audio/transcribe",
+                    "device": f"cuda:{device_index}",
+                },
+            )
 
         await asyncio.to_thread(_load)
 

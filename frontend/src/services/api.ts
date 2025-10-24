@@ -35,6 +35,17 @@ export interface GPUStatus {
   temperature?: number;
 }
 
+export interface ModelRuntimeInfo {
+  state: "idle" | "loading" | "ready" | "error";
+  progress: number;
+  status: string;
+  details?: Record<string, unknown> | null;
+  server?: Record<string, unknown> | null;
+  downloaded: boolean;
+  last_error?: string | null;
+  updated_at?: string | null;
+}
+
 export interface ModelStatus {
   identifier: string;
   task: string;
@@ -42,6 +53,7 @@ export interface ModelStatus {
   description: string;
   format: string;
   params?: Record<string, unknown>;
+  runtime?: ModelRuntimeInfo | null;
 }
 
 export interface DashboardState {

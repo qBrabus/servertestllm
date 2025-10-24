@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
@@ -35,6 +36,7 @@ class QwenModel(BaseModelWrapper):
             import torch
             from transformers import AutoTokenizer
             from vllm import AsyncEngineArgs, AsyncLLMEngine
+            from huggingface_hub import snapshot_download
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger Qwen avec vLLM")
@@ -46,6 +48,7 @@ class QwenModel(BaseModelWrapper):
             visible = ",".join(str(idx) for idx in preferred) if preferred else None
             previous_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
             self._visible_devices_backup = previous_visible
+            os.environ.setdefault("VLLM_USE_TRUST_REMOTE_CODE", "1")
 
             try:
                 if visible:
@@ -57,16 +60,36 @@ class QwenModel(BaseModelWrapper):
                     os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", auth_token)
                     os.environ.setdefault("HUGGINGFACE_TOKEN", auth_token)
 
-                self.tokenizer = AutoTokenizer.from_pretrained(
-                    self.model_id,
+                self.update_runtime(
+                    progress=12,
+                    status="Synchronising weights",
+                    details={
+                        "tensor_parallel": tensor_parallel,
+                        "preferred_device_ids": self.preferred_device_ids,
+                    },
+                )
+
+                download_root = snapshot_download(
+                    repo_id=self.model_id,
                     cache_dir=str(self.cache_dir),
                     token=auth_token,
+                    local_dir_use_symlinks=False,
+                    progress_callback=self._on_download_progress,
+                )
+
+                model_path = Path(download_root)
+                self.update_runtime(progress=55, status="Loading tokenizer", downloaded=True)
+
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    str(model_path),
+                    cache_dir=str(self.cache_dir),
+                    use_auth_token=auth_token,
                     trust_remote_code=True,
                 )
 
                 engine_args = AsyncEngineArgs(
-                    model=self.model_id,
-                    tokenizer=self.model_id,
+                    model=str(model_path),
+                    tokenizer=str(model_path),
                     tensor_parallel_size=tensor_parallel,
                     dtype="half",
                     download_dir=str(self.cache_dir),
@@ -78,6 +101,17 @@ class QwenModel(BaseModelWrapper):
                 )
 
                 self._engine = AsyncLLMEngine.from_engine_args(engine_args)
+                self.update_runtime(
+                    progress=92,
+                    status="vLLM engine initialised",
+                    server={
+                        "type": "vLLM",
+                        "endpoint": "/v1/chat/completions",
+                        "tensor_parallel": tensor_parallel,
+                        "visible_gpus": visible or "auto",
+                        "model_path": str(model_path),
+                    },
+                )
             except Exception:
                 if previous_visible is None:
                     os.environ.pop("CUDA_VISIBLE_DEVICES", None)
@@ -87,6 +121,18 @@ class QwenModel(BaseModelWrapper):
                 raise
 
         await asyncio.to_thread(_load)
+
+    def _on_download_progress(self, progress) -> None:
+        total = getattr(progress, "total", None)
+        current = getattr(progress, "current", None)
+        file = getattr(progress, "file", "")
+        if total and total > 0 and current is not None:
+            ratio = current / float(total)
+            percent = 15 + int(ratio * 35)
+            self.update_runtime(
+                progress=min(50, percent),
+                status=f"Downloading {Path(file).name}" if file else "Downloading model shards",
+            )
 
     async def _unload(self) -> None:
         if self._engine is not None:
