@@ -45,17 +45,29 @@ class ModelRegistry:
         def _qwen_factory() -> BaseModelWrapper:
             from ..models.qwen import QwenModel
 
-            return QwenModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+            return QwenModel(
+                cache_dir=self._cache_dir,
+                hf_token=self._hf_token,
+                preferred_device_ids=[0],
+            )
 
         def _canary_factory() -> BaseModelWrapper:
             from ..models.canary import CanaryASRModel
 
-            return CanaryASRModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+            return CanaryASRModel(
+                cache_dir=self._cache_dir,
+                hf_token=self._hf_token,
+                preferred_device_ids=[0],
+            )
 
         def _pyannote_factory() -> BaseModelWrapper:
             from ..models.pyannote_model import PyannoteDiarizationModel
 
-            return PyannoteDiarizationModel(cache_dir=self._cache_dir, hf_token=self._hf_token)
+            return PyannoteDiarizationModel(
+                cache_dir=self._cache_dir,
+                hf_token=self._hf_token,
+                preferred_device_ids=[0],
+            )
 
         self._slots = {
             "qwen": ModelSlot(
@@ -78,7 +90,7 @@ class ModelRegistry:
             ),
             "pyannote": ModelSlot(
                 metadata=ModelMetadata(
-                    identifier="pyannote/speaker-diarization-community-1/",
+                    identifier="pyannote/speaker-diarization-community-1",
                     task="speaker-diarization",
                     description="Pyannote diarization community pipeline",
                     format="wav/ogg/flac",

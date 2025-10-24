@@ -33,14 +33,14 @@ class CanaryASRModel(BaseModelWrapper):
             from huggingface_hub import hf_hub_download
             from nemo.collections.asr.models import ASRModel
 
+            if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
+                raise RuntimeError("CUDA est requis pour charger le modèle Canary")
+
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             primary_gpu = self.primary_device()
-
-            if torch.cuda.is_available():
-                device_index = primary_gpu if primary_gpu is not None else 0
-                target_device = torch.device("cuda", device_index)
-            else:
-                target_device = torch.device("cpu")
+            device_index = primary_gpu if primary_gpu is not None else 0
+            torch.cuda.set_device(device_index)
+            target_device = torch.device("cuda", device_index)
 
             nemo_path = hf_hub_download(
                 repo_id=self.model_id,
@@ -50,8 +50,6 @@ class CanaryASRModel(BaseModelWrapper):
             )
 
             model = ASRModel.restore_from(restore_path=nemo_path, map_location=target_device)
-
-            # Ensure the model runs on the requested device.
             model = model.to(target_device)
             model.eval()
 
@@ -64,7 +62,7 @@ class CanaryASRModel(BaseModelWrapper):
             import torch
 
             self._pipeline = None
-            if torch.cuda.is_available():
+            if torch.cuda.is_available():  # pragma: no branch - best effort
                 torch.cuda.empty_cache()
 
         await asyncio.to_thread(_cleanup)
@@ -73,26 +71,32 @@ class CanaryASRModel(BaseModelWrapper):
         await self.ensure_loaded()
 
         def _run() -> Dict[str, Any]:
-            import librosa
             import numpy as np
             import soundfile as sf
             import tempfile
+            import torch
+            import torchaudio.functional as F
+
+            if self._pipeline is None:
+                raise RuntimeError("Le modèle Canary n'est pas chargé")
 
             target_sr = sampling_rate or 16000
-            audio_array, sr = sf.read(io.BytesIO(audio_bytes)) if audio_bytes else (np.array([]), target_sr)
-            if audio_array.ndim > 1:
-                audio_array = audio_array.mean(axis=1)
-            if sr != target_sr and audio_array.size > 0:
-                audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=target_sr)
-            if self._pipeline is None:
-                raise RuntimeError("Canary ASR pipeline is not loaded")
-            if audio_array.size == 0:
+            if not audio_bytes:
                 return {"text": "", "sampling_rate": target_sr}
 
-            audio_array = audio_array.astype(np.float32)
+            audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+            if audio_array.ndim > 1:
+                audio_array = audio_array.mean(axis=1)
+            waveform = torch.from_numpy(audio_array)
+            if waveform.ndim == 1:
+                waveform = waveform.unsqueeze(0)
+            if sr != target_sr:
+                waveform = F.resample(waveform, sr, target_sr)
+            waveform = waveform.squeeze(0).contiguous()
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
-                sf.write(tmp_path, audio_array, target_sr)
+                sf.write(tmp_path, waveform.cpu().numpy().astype(np.float32), target_sr)
 
             try:
                 outputs = self._pipeline.transcribe(
