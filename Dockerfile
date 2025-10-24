@@ -2,6 +2,14 @@
 FROM node:20-bullseye AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
+
+# Disable npm audit/fund checks and progress spinners. These may hang or take a
+# very long time when the build environment does not have unrestricted network
+# access, which manifested as the Docker build being “stuck” at the npm ci step.
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_PROGRESS=false
+
 RUN npm ci --legacy-peer-deps
 COPY frontend ./
 RUN npm run build
