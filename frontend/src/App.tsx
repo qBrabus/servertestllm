@@ -16,7 +16,8 @@ import {
   ListItemIcon,
   ListItemText,
   Toolbar,
-  Typography
+  Typography,
+  alpha
 } from "@mui/material";
 import { useState } from "react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -26,6 +27,7 @@ import ModelsPage from "./pages/ModelsPage";
 import PlaygroundPage from "./pages/PlaygroundPage";
 import AudioPage from "./pages/AudioPage";
 import ApiKeyDialog from "./components/ApiKeyDialog";
+import controlPlaneLogo from "./assets/unified-logo.svg";
 
 const drawerWidth = 260;
 
@@ -47,7 +49,8 @@ const App = () => {
 
   const drawer = (
     <div>
-      <Toolbar>
+      <Toolbar sx={{ gap: 1, alignItems: "center" }}>
+        <SettingsEthernetIcon color="primary" />
         <Typography variant="h6">Unified Gateway</Typography>
       </Toolbar>
       <Divider />
@@ -71,8 +74,24 @@ const App = () => {
   );
 
   return (
-    <Box sx={{ display: "flex" }}>
-      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+    <Box
+      sx={{
+        display: "flex",
+        minHeight: "100vh",
+        background:
+          "radial-gradient(circle at 20% 20%, rgba(14,165,233,0.12), transparent 55%), linear-gradient(160deg, rgba(13,17,23,0.95) 0%, rgba(16,24,39,0.92) 100%)"
+      }}
+    >
+      <AppBar
+        position="fixed"
+        sx={{
+          zIndex: (theme) => theme.zIndex.drawer + 1,
+          background: (theme) =>
+            `linear-gradient(120deg, ${alpha(theme.palette.primary.main, 0.85)} 0%, ${alpha(theme.palette.secondary.main, 0.65)} 100%)`,
+          boxShadow: "0 12px 30px rgba(15,118,110,0.35)",
+          backdropFilter: "blur(12px)"
+        }}
+      >
         <Toolbar>
           <IconButton
             color="inherit"
@@ -83,10 +102,20 @@ const App = () => {
           >
             <MenuIcon />
           </IconButton>
-          <SettingsEthernetIcon sx={{ mr: 1 }} />
-          <Typography variant="h6" noWrap component="div">
-            Unified Inference Control Plane
-          </Typography>
+          <Box
+            component="img"
+            src={controlPlaneLogo}
+            alt="Unified control plane"
+            sx={{ width: 40, height: 40, mr: 2, filter: "drop-shadow(0 6px 12px rgba(15,118,110,0.45))" }}
+          />
+          <Box>
+            <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 700 }}>
+              Unified Inference Control Plane
+            </Typography>
+            <Typography variant="caption" sx={{ opacity: 0.9 }}>
+              Supervision en direct des modèles et pipelines audio/LLM
+            </Typography>
+          </Box>
           <Box sx={{ flexGrow: 1 }} />
           <ApiKeyDialog />
         </Toolbar>
@@ -123,17 +152,28 @@ const App = () => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: { xs: 3, md: 4 },
           width: { sm: `calc(100% - ${drawerWidth}px)` },
-          mt: 8
+          mt: 8,
+          position: "relative"
         }}
       >
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/models" element={<ModelsPage />} />
-          <Route path="/audio" element={<AudioPage />} />
-          <Route path="/playground" element={<PlaygroundPage />} />
-        </Routes>
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            background: "radial-gradient(circle at 85% 15%, rgba(147,51,234,0.18), transparent 60%)",
+            pointerEvents: "none"
+          }}
+        />
+        <Box sx={{ position: "relative" }}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/models" element={<ModelsPage />} />
+            <Route path="/audio" element={<AudioPage />} />
+            <Route path="/playground" element={<PlaygroundPage />} />
+          </Routes>
+        </Box>
       </Box>
     </Box>
   );

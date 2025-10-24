@@ -43,11 +43,17 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             import torch
             from pyannote.audio import Pipeline
             from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
+            from huggingface_hub import snapshot_download
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger le pipeline Pyannote")
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+            self.update_runtime(
+                status="Validating environment",
+                progress=10,
+                details={"preferred_device_ids": self.preferred_device_ids},
+            )
 
             signature = inspect.signature(
                 speaker_diarization_module.SpeakerDiarization.__init__
@@ -62,12 +68,40 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                             LOGGER.debug("Ignoring deprecated 'plda' parameter for Pyannote pipeline")
                         return original_init(self, *args, **kwargs)
 
-                    speaker_diarization_module.SpeakerDiarization.__init__ = patched_init  # type: ignore[assignment]
+                speaker_diarization_module.SpeakerDiarization.__init__ = patched_init  # type: ignore[assignment]
+
+            progress_floor = 15
+
+            def _progress_callback(progress):  # pragma: no cover - executed in thread
+                total = getattr(progress, "total", None)
+                current = getattr(progress, "current", None)
+                file = getattr(progress, "file", "")
+                if total and total > 0 and current is not None:
+                    ratio = current / float(total)
+                    percent = progress_floor + int(ratio * 45)
+                    self.update_runtime(
+                        progress=min(90, percent),
+                        status=f"Downloading {Path(file).name}" if file else "Downloading artifacts",
+                    )
+
+            repo_path = snapshot_download(
+                repo_id=self.model_id,
+                cache_dir=str(self.cache_dir),
+                token=auth_token,
+                local_dir_use_symlinks=False,
+                allow_patterns=["*.bin", "*.ckpt", "*.pt", "*.yaml", "*.json"],
+                progress_callback=_progress_callback,
+            )
+
+            self.update_runtime(status="Initializing pipeline", progress=90, downloaded=True)
+
+            pipeline_kwargs = {"cache_dir": str(self.cache_dir)}
+            if auth_token:
+                pipeline_kwargs["use_auth_token"] = auth_token
 
             self.pipeline = Pipeline.from_pretrained(
-                self.model_id,
-                token=auth_token,
-                cache_dir=str(self.cache_dir),
+                repo_path,
+                **pipeline_kwargs,
             )
 
             target_gpu = self.primary_device() or 0
@@ -78,6 +112,15 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 raise RuntimeError(
                     f"Impossible de déplacer Pyannote sur le GPU {target_gpu}: {exc}"
                 ) from exc
+            self.update_runtime(
+                status="Pipeline ready",
+                progress=98,
+                server={
+                    "type": "Pyannote",
+                    "endpoint": "/api/diarization/process",
+                    "device": f"cuda:{target_gpu}",
+                },
+            )
 
         await asyncio.to_thread(_load)
 
