@@ -7,7 +7,7 @@ COPY frontend ./
 RUN npm run build
 
 # Stage 2: Backend
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -37,11 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
-RUN python3 -m pip install --upgrade "pip<24.3" setuptools wheel && \
-    python3 -m pip install Cython && \
-    python3 -m pip install typing_extensions && \
-    python3 -m pip install --no-deps numpy && \
-    python3 -m pip install -r /app/requirements.txt
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install --no-cache-dir numpy Cython typing_extensions && \
+    python3 -m pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124 && \
+    python3 -m pip install --no-cache-dir -r /app/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124
 
 COPY backend /app/backend
 COPY --from=frontend-builder /frontend/dist /app/frontend
