@@ -14,14 +14,15 @@ orjson==3.10.7
 aiofiles==23.2.1
 redis==5.0.8
 
-# Pile GPU / IA
+# Pile GPU / IA (versions alignées : PyTorch 2.5.1 + écosystème compatible)
 torch==2.5.1
 torchvision==0.20.1
 torchaudio==2.5.1
 accelerate==1.1.1
 transformers==4.46.1
 huggingface-hub==0.25.2
-vllm==0.4.2
+# vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
+vllm==0.6.6
 nemo_toolkit[asr]==1.23.0
 pyannote.audio==3.3.2
 soundfile==0.13.1
