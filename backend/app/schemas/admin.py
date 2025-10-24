@@ -40,3 +40,11 @@ class DashboardState(BaseModel):
     gpus: List[GPUInfo]
     system: SystemMetrics
     models: Dict[str, ModelInfo]
+
+
+class HuggingFaceTokenStatus(BaseModel):
+    has_token: bool
+
+
+class HuggingFaceTokenUpdate(BaseModel):
+    token: str | None = None

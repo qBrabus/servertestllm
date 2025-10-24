@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from ..config import settings
 from ..schemas.admin import (
     DashboardState,
     GPUInfo,
+    HuggingFaceTokenStatus,
+    HuggingFaceTokenUpdate,
     ModelInfo,
     ModelLoadRequest,
     RegistryStatus,
@@ -12,6 +15,7 @@ from ..schemas.admin import (
 )
 from ..services.gpu_monitor import gpu_monitor
 from ..services.model_registry import registry
+from ..services.token_store import token_store
 
 router = APIRouter(tags=["admin"])
 
@@ -67,3 +71,23 @@ async def unload_model(model_key: str) -> RegistryStatus:
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown model")
     return RegistryStatus(models=await _collect_model_info())
+
+
+@router.get("/huggingface/token", response_model=HuggingFaceTokenStatus)
+async def get_huggingface_token() -> HuggingFaceTokenStatus:
+    current = registry.get_hf_token()
+    if current is None:
+        current = token_store.load()
+    return HuggingFaceTokenStatus(has_token=current is not None)
+
+
+@router.post("/huggingface/token", response_model=HuggingFaceTokenStatus)
+async def set_huggingface_token(payload: HuggingFaceTokenUpdate) -> HuggingFaceTokenStatus:
+    raw_value = payload.token.strip() if payload.token else None
+    if raw_value:
+        token_store.save(raw_value)
+    else:
+        token_store.clear()
+    await registry.set_hf_token(raw_value)
+    object.__setattr__(settings, "huggingface_token", raw_value)
+    return HuggingFaceTokenStatus(has_token=raw_value is not None)

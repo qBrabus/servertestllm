@@ -12,6 +12,7 @@ from .config import settings
 from .routers import admin, audio, diarization, openai
 from .services.gpu_monitor import gpu_monitor
 from .services.model_registry import registry
+from .services.token_store import token_store
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,13 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def on_startup() -> None:
         logging.basicConfig(level=settings.log_level.upper())
-        registry.configure(hf_token=settings.huggingface_token, cache_dir=settings.model_cache_dir)
+        token_store.configure(settings.model_cache_dir)
+        initial_token = settings.huggingface_token or token_store.load()
+        if settings.huggingface_token and not token_store.has_token():
+            token_store.save(settings.huggingface_token)
+        if initial_token is not None:
+            object.__setattr__(settings, "huggingface_token", initial_token)
+        registry.configure(hf_token=initial_token, cache_dir=settings.model_cache_dir)
         gpu_monitor.start()
         if not settings.lazy_load_models:
             for key in registry.keys():

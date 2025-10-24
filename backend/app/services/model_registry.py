@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -39,6 +40,7 @@ class ModelRegistry:
         self._hf_token = hf_token
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._apply_token_to_environment()
         self._register_defaults()
 
     def _register_defaults(self) -> None:
@@ -102,6 +104,25 @@ class ModelRegistry:
 
     def keys(self) -> List[str]:
         return list(self._slots.keys())
+
+    def get_hf_token(self) -> Optional[str]:
+        return self._hf_token
+
+    async def set_hf_token(self, token: Optional[str]) -> None:
+        async with self._lock:
+            self._hf_token = token
+            self._apply_token_to_environment()
+            for slot in self._slots.values():
+                if slot.instance is not None:
+                    slot.instance.set_hf_token(token)
+
+    def _apply_token_to_environment(self) -> None:
+        if self._hf_token:
+            os.environ["HUGGINGFACE_TOKEN"] = self._hf_token
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = self._hf_token
+        else:
+            os.environ.pop("HUGGINGFACE_TOKEN", None)
+            os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
 
     async def get(self, key: str) -> BaseModelWrapper:
         async with self._lock:

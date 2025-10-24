@@ -53,8 +53,28 @@ export interface DashboardState {
   models: Record<string, ModelStatus>;
 }
 
+export interface HuggingFaceTokenStatus {
+  has_token: boolean;
+}
+
 export const fetchDashboard = async (): Promise<DashboardState> => {
   const { data } = await apiClient.get<DashboardState>("/api/admin/status");
+  return data;
+};
+
+export const fetchHuggingFaceTokenStatus = async (): Promise<HuggingFaceTokenStatus> => {
+  const { data } = await apiClient.get<HuggingFaceTokenStatus>("/api/admin/huggingface/token");
+  return data;
+};
+
+export const updateHuggingFaceToken = async (
+  token: string | null
+): Promise<HuggingFaceTokenStatus> => {
+  const payload = { token: token?.trim() ?? null };
+  const { data } = await apiClient.post<HuggingFaceTokenStatus>(
+    "/api/admin/huggingface/token",
+    payload
+  );
   return data;
 };
 

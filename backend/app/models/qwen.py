@@ -55,6 +55,7 @@ class QwenModel(BaseModelWrapper):
 
                 if auth_token:
                     os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", auth_token)
+                    os.environ.setdefault("HUGGINGFACE_TOKEN", auth_token)
 
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     self.model_id,
@@ -74,7 +75,6 @@ class QwenModel(BaseModelWrapper):
                     max_model_len=8192,
                     enforce_eager=True,
                     worker_use_ray=False,
-                    hf_access_token=auth_token,
                 )
 
                 self._engine = AsyncLLMEngine.from_engine_args(engine_args)
