@@ -16,6 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HUGGINGFACE_HUB_CACHE=/models
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-utils \
     python3 \
     python3-pip \
     python3-venv \
@@ -38,7 +39,10 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir numpy Cython typing_extensions && \
+    python3 -m pip install --no-cache-dir \
+        numpy==1.26.4 \
+        Cython==0.29.37 \
+        typing_extensions==4.12.2 && \
     python3 -m pip install --no-cache-dir \
         torch==2.5.1 \
         torchvision==0.20.1 \
