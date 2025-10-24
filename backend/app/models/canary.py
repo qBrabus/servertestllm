@@ -30,6 +30,25 @@ class CanaryASRModel(BaseModelWrapper):
     async def load(self) -> None:
         def _load():
             import torch
+            import huggingface_hub
+
+            if not hasattr(huggingface_hub, "ModelFilter"):
+                class _ModelFilter:  # pragma: no cover - compatibility shim
+                    def __init__(self, *args, **kwargs) -> None:
+                        self.args = args
+                        self.kwargs = kwargs
+
+                    def __call__(self, *args, **kwargs):
+                        return True
+
+                huggingface_hub.ModelFilter = _ModelFilter  # type: ignore[attr-defined]
+                if hasattr(huggingface_hub, "__all__") and isinstance(
+                    huggingface_hub.__all__, (list, tuple)
+                ):  # pragma: no cover - defensive update
+                    all_values = set(huggingface_hub.__all__)
+                    all_values.add("ModelFilter")
+                    huggingface_hub.__all__ = tuple(all_values)  # type: ignore[assignment]
+
             from huggingface_hub import hf_hub_download
             from nemo.collections.asr.models import ASRModel
 

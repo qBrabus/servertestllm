@@ -51,6 +51,11 @@ class BaseModelWrapper(ABC):
     def primary_device(self) -> Optional[int]:
         return self._preferred_device_ids[0] if self._preferred_device_ids else None
 
+    def set_hf_token(self, token: Optional[str]) -> None:
+        """Update the Hugging Face token used by the wrapper."""
+
+        self.hf_token = token
+
     async def ensure_loaded(self) -> None:
         if not self._is_loaded:
             async with self._lock:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import io
 import logging
 import os
@@ -40,14 +42,31 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         def _load():
             import torch
             from pyannote.audio import Pipeline
+            from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger le pipeline Pyannote")
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+
+            signature = inspect.signature(
+                speaker_diarization_module.SpeakerDiarization.__init__
+            )
+            if "plda" not in signature.parameters:
+                original_init = speaker_diarization_module.SpeakerDiarization.__init__
+                if getattr(original_init, "__wrapped__", None) is None:
+
+                    @functools.wraps(original_init)
+                    def patched_init(self, *args, plda=None, **kwargs):  # type: ignore[override]
+                        if plda is not None:
+                            LOGGER.debug("Ignoring deprecated 'plda' parameter for Pyannote pipeline")
+                        return original_init(self, *args, **kwargs)
+
+                    speaker_diarization_module.SpeakerDiarization.__init__ = patched_init  # type: ignore[assignment]
+
             self.pipeline = Pipeline.from_pretrained(
                 self.model_id,
-                use_auth_token=auth_token,
+                token=auth_token,
                 cache_dir=str(self.cache_dir),
             )
 
