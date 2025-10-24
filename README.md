@@ -1,84 +1,104 @@
-# Unified Inference Gateway
+# Passerelle d'Inférence Unifiée
 
-This project packages a complete inference stack for large language models, speech-to-text, and speaker diarization into a single GPU-enabled container. It exposes an OpenAI-compatible API together with administrative endpoints and a full React dashboard for orchestration.
+Ce projet réunit dans un même conteneur GPU une API de conversation OpenAI-compatible, un service de reconnaissance vocale Canary (.nemo), ainsi qu'un pipeline de diarisation Pyannote. L'ensemble du code et de la documentation est désormais en français pour faciliter la maintenance de l'équipe. Toutes les inférences sont exécutées sur GPU (DGX 8xH200, CUDA >= 12.4) – aucun retour n'est prévu sur CPU en dehors d'opérations annexes inévitables (lecture disque, pré/post-traitements légers).
 
-## Features
+## Fonctionnalités principales
 
-- **LLM Inference** via [Qwen/Qwen3-VL-30B-A3B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct).
-- **Speech-to-Text** with NVIDIA's [canary-1b-v2](https://huggingface.co/nvidia/canary-1b-v2).
-- **Speaker Diarization** using [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1/).
-- **OpenAI-compatible REST API** (`/v1/chat/completions`, `/v1/completions`).
-- **Audio APIs** for transcription (`/api/audio/transcribe`) and diarization (`/api/diarization/process`).
-- **Administrative APIs** to monitor GPUs, system load, and model lifecycle management.
-- **React + Material UI dashboard** for real-time monitoring, model control, audio tooling, and an interactive OpenAI playground.
+- **LLM Qwen3 VL 30B** servi par [vLLM](https://github.com/vllm-project/vllm) pour des réponses rapides et stables.
+- **ASR multilingue NVIDIA Canary** (`.nemo`) via [NeMo Toolkit](https://github.com/NVIDIA/NeMo) avec exécution exclusivement sur GPU.
+- **Diarisation Pyannote** avec transfert systématique du pipeline sur GPU.
+- **API OpenAI-compatible** : `POST /v1/chat/completions` et `POST /v1/completions`.
+- **API audio** : `POST /api/audio/transcribe` (transcription) et `POST /api/diarization/process` (diarisation).
+- **Tableau de bord React** (Vite + Material UI) pour surveiller l'état des modèles, l'utilisation GPU et exécuter des requêtes.
 
-## Prerequisites
+## Prérequis
 
-- Docker with GPU support (`nvidia-docker2` or Docker 24+ with the NVIDIA runtime).
-- NVIDIA GPU drivers compatible with CUDA 12.4.
+- Python 3.10 (testé) si vous lancez le backend hors conteneur.
+- Docker 24+ avec le runtime NVIDIA ou `nvidia-docker2` pour l'exécution conteneurisée.
+- Pilotes NVIDIA compatibles CUDA 12.4 et accès à un serveur DGX 8xH200.
+- Un jeton Hugging Face (`HUGGINGFACE_TOKEN`) autorisant le téléchargement des modèles Canary et Pyannote.
+- Accès réseau à Hugging Face (les modèles sont tirés dynamiquement).
 
-## Building the Container
+## Installation locale (hors Docker)
 
-Use the helper script to build the unified image (default tag `unified-inference:latest`):
+1. Créez un environnement virtuel Python 3.10 :
+   ```bash
+   python3.10 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
+   ```
+2. Installez les dépendances backend (les URLs nécessaires pour les roues CUDA sont intégrées au fichier) :
+   ```bash
+   pip install -r backend/requirements.txt
+   ```
+3. Exportez les variables requises (au minimum le jeton Hugging Face) :
+   ```bash
+   export HUGGINGFACE_TOKEN="<token>"
+   export MODEL_CACHE_DIR="$(pwd)/model_cache"
+   ```
+4. Lancez l'API FastAPI en local :
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+> **Important** : Les modèles refuseront de se charger si aucun GPU n'est visible (`CUDA_VISIBLE_DEVICES`). Pensez à vérifier `nvidia-smi` avant de démarrer.
+
+## Construction et exécution Docker
+
+### Construction
+
+Le script `build_docker.sh` orchestre la construction multi-étapes (frontend puis backend) :
 
 ```bash
-./build_docker.sh [custom-tag]
+./build_docker.sh mon-image:latest
 ```
 
-The build performs the following steps:
+Le `Dockerfile` s'appuie sur `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`, installe Node 20 pour le frontend, puis FastAPI/vLLM/NeMo/Pyannote côté backend avec les roues CUDA fournies par NVIDIA.
 
-1. Installs frontend dependencies and generates a production build of the React dashboard.
-2. Installs the Python backend dependencies (FastAPI, vLLM, Transformers, Pyannote, etc.).
-3. Bundles both layers into a CUDA 12.4 runtime image with FFmpeg and audio prerequisites.
+### Exécution
 
-## Running the Stack
-
-Launch the container with GPU access, expose port `8000`, and persist model weights to `./model_cache`:
+Le script suivant publie le port 8000, partage le cache de modèles et rend tous les GPU visibles :
 
 ```bash
-./run_docker.sh [image-tag]
+./run_docker.sh mon-image:latest
 ```
 
-Environment variables (overridable before running the script):
+Variables d'environnement principales (à exporter avant l'exécution si nécessaire) :
 
-- `HUGGINGFACE_TOKEN` – defaults to the provided token for gated model downloads.
-- `OPENAI_KEYS` – optional comma-separated API keys required when securing the OpenAI-compatible routes.
-- `HOST_PORT` – host port for the FastAPI server (default `8000`).
-- `MODEL_CACHE_DIR` – host directory to persist Hugging Face caches (default `./model_cache`).
+- `HUGGINGFACE_TOKEN` : jeton Hugging Face obligatoire pour Canary et Pyannote.
+- `OPENAI_KEYS` : chaîne de clés API séparées par des virgules pour sécuriser les routes OpenAI (facultatif, accès libre sinon).
+- `MODEL_CACHE_DIR` : répertoire hôte pour la mise en cache (`./model_cache` par défaut).
+- `HOST_PORT` : port hôte mappé sur `8000` (par défaut `8000`).
 
-After the container starts:
+## Utilisation
 
-- Access the **admin dashboard** at `http://<host>:<HOST_PORT>/`.
-- Call the **OpenAI-compatible endpoints** at `http://<host>:<HOST_PORT>/v1/...`.
-- Use the **audio APIs** at `http://<host>:<HOST_PORT>/api/audio/...` and `http://<host>:<HOST_PORT>/api/diarization/...`.
+- **Tableau de bord** : `http://<hôte>:<port>/`
+- **API OpenAI** : `http://<hôte>:<port>/v1/chat/completions` et `/v1/completions`
+- **Transcription audio** : `http://<hôte>:<port>/api/audio/transcribe`
+- **Diarisation** : `http://<hôte>:<port>/api/diarization/process`
+- **Administration** : `GET /api/admin/status`, `POST /api/admin/models/{clé}/load`, `POST /api/admin/models/{clé}/unload`
 
-## API Overview
+Clés modèles disponibles :
 
-### OpenAI-Compatible
+- `qwen` — LLM multimodal (vLLM)
+- `canary` — ASR NeMo
+- `pyannote` — Diarisation
 
-- `POST /v1/chat/completions`
-- `POST /v1/completions`
+## Notes techniques
 
-### Audio & Diarization
+- Le répertoire `/models` (ou la valeur de `MODEL_CACHE_DIR`) est partagé entre tous les services et persiste entre deux démarrages pour éviter de re-télécharger les poids.
+- Les scripts d'inférence convertissent systématiquement les entrées audio en tenseurs PyTorch et utilisent `torchaudio` pour le resampling, supprimant toute dépendance à Librosa/Numba.
+- Qwen est chargé via `AsyncLLMEngine` de vLLM avec `tensor_parallel_size=1` par défaut ; le registre de modèles autorise toutefois la mise à jour dynamique des préférences GPU.
+- Chaque wrapper vérifie explicitement la disponibilité CUDA et déclenche une erreur claire si aucun GPU n'est visible.
+- Les dépendances Python critiques sont figées (`backend/requirements.txt`) pour éviter les erreurs `resolution-too-deep` de pip.
 
-- `POST /api/audio/transcribe` (multipart `file` field)
-- `POST /api/diarization/process` (multipart `file` field)
+## Tests et maintenance
 
-### Administration
+- Le backend suit une structure FastAPI classique (`backend/app`). Le point d'entrée est `app.main:app`.
+- Pour vérifier la validité du code Python sans lancer les modèles (notamment en CI CPU-only), vous pouvez exécuter :
+  ```bash
+  python -m compileall backend/app
+  ```
+- Les modèles ne sont chargés que sur demande (lazy loading). Vous pouvez forcer le chargement au démarrage via `LAZY_LOAD_MODELS=false`.
 
-- `GET /api/admin/status`
-- `POST /api/admin/models/{model_key}/load`
-- `POST /api/admin/models/{model_key}/unload`
-
-Model keys: `qwen`, `canary`, `pyannote`.
-
-## Development
-
-- Backend located under `backend/app` (FastAPI application entry point: `app.main:app`).
-- Frontend located under `frontend` (React + Vite). Use `npm install` and `npm run dev` for local development if needed.
-
-## Notes
-
-- The first inference call for each model will trigger a download to `/models` inside the container (bind-mounted by the run script).
-- GPU utilization metrics rely on `torch`/`GPUtil`; ensure the container runs with `--gpus all`.
-- When `OPENAI_KEYS` is empty, OpenAI endpoints are accessible without authentication.
+Bon usage ! Toute contribution doit conserver ces contraintes GPU et la documentation en français.

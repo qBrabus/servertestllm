@@ -6,7 +6,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
 
@@ -14,23 +14,35 @@ from .base import BaseModelWrapper, ModelMetadata
 LOGGER = logging.getLogger(__name__)
 
 
+if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
+    from pyannote.audio import Pipeline
+
+
 class PyannoteDiarizationModel(BaseModelWrapper):
     model_id = "pyannote/speaker-diarization-community-1"
 
-    def __init__(self, cache_dir: Path, hf_token: str | None = None):
+    def __init__(
+        self,
+        cache_dir: Path,
+        hf_token: str | None = None,
+        preferred_device_ids: list[int] | None = None,
+    ):
         metadata = ModelMetadata(
             identifier=self.model_id,
             task="speaker-diarization",
             description="Pyannote diarization community pipeline",
             format="wav/ogg/flac",
         )
-        super().__init__(metadata, cache_dir, hf_token)
-        self.pipeline: Pipeline | None = None
+        super().__init__(metadata, cache_dir, hf_token, preferred_device_ids)
+        self.pipeline: "Pipeline" | None = None
 
     async def load(self) -> None:
         def _load():
             import torch
             from pyannote.audio import Pipeline
+
+            if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
+                raise RuntimeError("CUDA est requis pour charger le pipeline Pyannote")
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             self.pipeline = Pipeline.from_pretrained(
@@ -39,16 +51,14 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 cache_dir=str(self.cache_dir),
             )
 
-            if torch.cuda.is_available():
-                target_gpu = self.primary_device() or 0
-                try:
-                    self.pipeline.to(torch.device("cuda", target_gpu))
-                except Exception as exc:  # pragma: no cover - best-effort fallback
-                    LOGGER.warning(
-                        "Failed to move pyannote pipeline to CUDA device %s, falling back to CPU: %s",
-                        target_gpu,
-                        exc,
-                    )
+            target_gpu = self.primary_device() or 0
+            torch.cuda.set_device(target_gpu)
+            try:
+                self.pipeline.to(torch.device("cuda", target_gpu))
+            except Exception as exc:  # pragma: no cover - remontée explicite
+                raise RuntimeError(
+                    f"Impossible de déplacer Pyannote sur le GPU {target_gpu}: {exc}"
+                ) from exc
 
         await asyncio.to_thread(_load)
 
@@ -62,26 +72,41 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         await self.ensure_loaded()
 
         def _run() -> Dict[str, Any]:
-            import librosa
+            import numpy as np
             import soundfile as sf
+            import torch
+            import torchaudio.functional as F
+
+            if self.pipeline is None:
+                raise RuntimeError("Le pipeline Pyannote n'est pas initialisé")
 
             target_sr = sampling_rate or 16000
-            audio_array, sr = sf.read(io.BytesIO(audio_bytes))
+            if not audio_bytes:
+                return {"segments": []}
+
+            audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
             if audio_array.ndim > 1:
                 audio_array = audio_array.mean(axis=1)
+            waveform = torch.from_numpy(audio_array)
+            if waveform.ndim == 1:
+                waveform = waveform.unsqueeze(0)
             if sr != target_sr:
-                audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=target_sr)
+                waveform = F.resample(waveform, sr, target_sr)
+            waveform = waveform.squeeze(0).contiguous()
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                sf.write(tmp.name, audio_array, target_sr)
-                diarization = self.pipeline(tmp.name)
-            Path(tmp.name).unlink(missing_ok=True)
+                tmp_path = Path(tmp.name)
+                sf.write(tmp_path, waveform.cpu().numpy().astype(np.float32), target_sr)
+                diarization = self.pipeline(str(tmp_path))
+            tmp_path.unlink(missing_ok=True)
+
             segments: List[Dict[str, Any]] = []
             for turn, _, speaker in diarization.itertracks(yield_label=True):
                 segments.append(
                     {
                         "speaker": speaker,
-                        "start": turn.start,
-                        "end": turn.end,
+                        "start": float(turn.start),
+                        "end": float(turn.end),
                     }
                 )
             return {"segments": segments}

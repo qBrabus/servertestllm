@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from typing import Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
 
 
 class QwenModel(BaseModelWrapper):
-    """Wrapper around the Qwen3 VL instruction-tuned model."""
+    """Wrapper autour du modèle Qwen3 VL en s'appuyant sur vLLM."""
 
     model_id = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 
@@ -26,84 +27,115 @@ class QwenModel(BaseModelWrapper):
         )
         super().__init__(metadata, cache_dir, hf_token, preferred_device_ids)
         self.tokenizer = None
-        self.model = None
-        self._device = "cpu"
+        self._engine = None
+        self._visible_devices_backup: str | None = None
 
     async def load(self) -> None:
         def _load():
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoTokenizer
+            from vllm import AsyncEngineArgs, AsyncLLMEngine
+
+            if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
+                raise RuntimeError("CUDA est requis pour charger Qwen avec vLLM")
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             preferred = self.preferred_device_ids
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_id,
-                cache_dir=str(self.cache_dir),
-                token=auth_token,
-                trust_remote_code=True,
-            )
-            if torch.cuda.is_available():
-                dtype = torch.float16
-                device_index = preferred[0] if preferred else 0
-                device = f"cuda:{device_index}"
-            else:
-                dtype = torch.float32
-                device = "cpu"
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_id,
-                torch_dtype=dtype,
-                device_map=None,
-                cache_dir=str(self.cache_dir),
-                token=auth_token,
-                trust_remote_code=True,
-            )
-            self.model = self.model.to(device)
-            self._device = device
+            tensor_parallel = max(1, len(preferred)) if preferred else 1
+
+            visible = ",".join(str(idx) for idx in preferred) if preferred else None
+            previous_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+            self._visible_devices_backup = previous_visible
+
+            try:
+                if visible:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = visible
+                elif "CUDA_VISIBLE_DEVICES" in os.environ:
+                    del os.environ["CUDA_VISIBLE_DEVICES"]
+
+                if auth_token:
+                    os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", auth_token)
+
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_id,
+                    cache_dir=str(self.cache_dir),
+                    token=auth_token,
+                    trust_remote_code=True,
+                )
+
+                engine_args = AsyncEngineArgs(
+                    model=self.model_id,
+                    tokenizer=self.model_id,
+                    tensor_parallel_size=tensor_parallel,
+                    dtype="half",
+                    download_dir=str(self.cache_dir),
+                    trust_remote_code=True,
+                    gpu_memory_utilization=0.90,
+                    max_model_len=8192,
+                    enforce_eager=True,
+                    worker_use_ray=False,
+                    hf_access_token=auth_token,
+                )
+
+                self._engine = AsyncLLMEngine.from_engine_args(engine_args)
+            except Exception:
+                if previous_visible is None:
+                    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+                else:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = previous_visible
+                self._visible_devices_backup = previous_visible
+                raise
 
         await asyncio.to_thread(_load)
 
     async def _unload(self) -> None:
-        def _cleanup():
+        if self._engine is not None:
+            await self._engine.shutdown()
+        self._engine = None
+        self.tokenizer = None
+        try:
             import torch
 
-            self.model = None
-            self.tokenizer = None
-            if torch.cuda.is_available():
+            if torch.cuda.is_available():  # pragma: no branch - libère la VRAM
                 torch.cuda.empty_cache()
-            self._device = "cpu"
-
-        await asyncio.to_thread(_cleanup)
+        except Exception:  # pragma: no cover - torch peut être déchargé lors de l'arrêt
+            pass
+        if self._visible_devices_backup is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = self._visible_devices_backup
+        elif "CUDA_VISIBLE_DEVICES" in os.environ:
+            del os.environ["CUDA_VISIBLE_DEVICES"]
+        self._visible_devices_backup = None
 
     async def infer(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, Any]:
         await self.ensure_loaded()
 
-        def _run() -> Dict[str, Any]:
-            import torch
+        if self._engine is None or self.tokenizer is None:
+            raise RuntimeError("Le moteur vLLM n'est pas initialisé")
 
-            prompt = self._build_prompt(messages)
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-            generation_config = dict(
-                max_new_tokens=kwargs.get("max_tokens", 512),
-                temperature=kwargs.get("temperature", 0.7),
-                top_p=kwargs.get("top_p", 0.9),
-            )
-            with torch.no_grad():
-                outputs = self.model.generate(**inputs, **generation_config)
-            text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            response = text[len(prompt) :].strip()
-            return {"content": response}
+        prompt = self._build_prompt(messages)
 
-        return await asyncio.to_thread(_run)
+        from vllm import SamplingParams
+
+        sampling_params = SamplingParams(
+            max_tokens=kwargs.get("max_tokens", 512),
+            temperature=kwargs.get("temperature", 0.7),
+            top_p=kwargs.get("top_p", 0.9),
+        )
+        request_id = str(uuid.uuid4())
+        outputs = await self._engine.generate(prompt, sampling_params, request_id=request_id)
+        if not outputs:
+            return {"content": ""}
+        first = outputs[0]
+        if not first.outputs:
+            return {"content": ""}
+        response = first.outputs[0].text.strip()
+        return {"content": response}
 
     def _build_prompt(self, messages: List[Dict[str, str]]) -> str:
-        history = []
-        for message in messages:
-            role = message.get("role", "user")
-            content = message.get("content", "")
-            history.append(f"[{role.upper()}]: {content}")
-        history.append("[ASSISTANT]:")
-        return "\n".join(history)
-
-    @property
-    def device(self) -> str:
-        return self._device
+        if self.tokenizer is None:
+            raise RuntimeError("Le tokenizer de Qwen n'est pas initialisé")
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
