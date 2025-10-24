@@ -32,9 +32,9 @@ run_buildx() {
 
 run_classic() {
   echo "[build] docker buildx not available, falling back to classic docker build"
-  DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS="${PROGRESS_MODE}" \
-    docker build \
-    --progress "${PROGRESS_MODE}" \
+  echo "[build] Disabling BuildKit to avoid buildx dependency"
+  echo "[build] Build cache optimizations unavailable in classic mode"
+  DOCKER_BUILDKIT=0 docker build \
     --tag "${IMAGE_TAG}" \
     .
 }
