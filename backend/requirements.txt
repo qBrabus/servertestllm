@@ -32,7 +32,8 @@ cmake==3.30.4
 Cython==0.29.37
 numpy==1.26.4
 h5py==3.11.0
-scipy==1.16.2
+# SciPy 1.16.x requires Python >=3.11; pin to last release supporting Python 3.10
+scipy==1.11.4
 pandas==2.2.3
 scikit-learn==1.7.2
 lhotse==1.31.1
