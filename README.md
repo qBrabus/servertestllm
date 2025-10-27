@@ -69,6 +69,11 @@ Variables d'environnement principales (à exporter avant l'exécution si nécess
 - `OPENAI_KEYS` : chaîne de clés API séparées par des virgules pour sécuriser les routes OpenAI (facultatif, accès libre sinon).
 - `MODEL_CACHE_DIR` : répertoire hôte pour la mise en cache (`./model_cache` par défaut).
 - `HOST_PORT` : port hôte mappé sur `8000` (par défaut `8000`).
+- `HOST_BIND_ADDRESS` : adresse d'écoute côté hôte passée à `docker -p`. Permet par exemple de forcer
+  la publication uniquement sur `10.200.50.46` si l'accès doit rester sur cette IP.
+- `ADVERTISED_HOSTS` : liste d'adresses (séparées par des virgules ou des espaces) à afficher après
+  le démarrage du conteneur. Utile lorsque le serveur doit rester joignable via une IP virtuelle ou
+  un alias qui n'est pas détecté automatiquement.
 
 ## Utilisation
 
