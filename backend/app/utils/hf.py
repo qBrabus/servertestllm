@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import random
 import time
@@ -12,6 +13,9 @@ from requests import exceptions as requests_exceptions
 from urllib3 import exceptions as urllib3_exceptions
 
 LOGGER = logging.getLogger(__name__)
+
+_SNAPSHOT_DOWNLOAD_PARAMS = inspect.signature(hf_snapshot_download).parameters
+_HAS_PROGRESS_CALLBACK = "progress_callback" in _SNAPSHOT_DOWNLOAD_PARAMS
 
 _RETRYABLE_EXCEPTIONS = (
     requests_exceptions.ConnectionError,
@@ -54,6 +58,12 @@ def snapshot_download_with_retry(
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
+            if not _HAS_PROGRESS_CALLBACK and "progress_callback" in kwargs:
+                # Older versions of ``huggingface_hub`` (<=0.23) do not accept the
+                # ``progress_callback`` argument. Drop it transparently so that the
+                # download still succeeds, albeit without live progress updates.
+                kwargs = dict(kwargs)
+                kwargs.pop("progress_callback", None)
             return hf_snapshot_download(**kwargs)
         except HfHubHTTPError as error:
             last_error = error
