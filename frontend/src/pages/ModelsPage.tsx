@@ -49,8 +49,10 @@ import { useMemo, useState } from "react";
 
 import heroLogo from "../assets/unified-logo.svg";
 import {
+  DashboardState,
   HuggingFaceTokenStatus,
   ModelRuntimeInfo,
+  ModelStatus,
   downloadModel,
   fetchHuggingFaceTokenStatus,
   loadModel,
@@ -148,17 +150,60 @@ const ModelsPage = () => {
 
   const loadMutation = useMutation({
     mutationFn: loadModel,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
   });
 
-  const downloadMutation = useMutation({
+  type DownloadMutationContext = { previousState?: DashboardState };
+
+  const downloadMutation = useMutation<Record<string, ModelStatus>, Error, string, DownloadMutationContext>({
     mutationFn: downloadModel,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    onMutate: async (key) => {
+      await queryClient.cancelQueries({ queryKey: ["dashboard"] });
+
+      const previousState = queryClient.getQueryData<DashboardState>(["dashboard"]);
+      if (previousState && previousState.models[key]) {
+        const currentModel = previousState.models[key];
+        const previousRuntime = currentModel.runtime ?? null;
+        const optimisticRuntime: ModelRuntimeInfo = {
+          state: "loading",
+          progress: Math.max(previousRuntime?.progress ?? 0, 5),
+          status: "Téléchargement en cours...",
+          details: previousRuntime?.details ?? null,
+          server: previousRuntime?.server ?? null,
+          downloaded: false,
+          last_error: null,
+          updated_at: new Date().toISOString()
+        };
+
+        const nextState: DashboardState = {
+          ...previousState,
+          models: {
+            ...previousState.models,
+            [key]: {
+              ...currentModel,
+              runtime: optimisticRuntime
+            }
+          }
+        };
+
+        queryClient.setQueryData(["dashboard"], nextState);
+      }
+
+      return { previousState };
+    },
+    onError: (_error, _key, context) => {
+      if (context?.previousState) {
+        queryClient.setQueryData(["dashboard"], context.previousState);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    }
   });
 
   const unloadMutation = useMutation({
     mutationFn: unloadModel,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] })
   });
 
   const tokenMutation = useMutation<HuggingFaceTokenStatus, Error, string | null>({
@@ -416,7 +461,6 @@ const ModelsPage = () => {
               ? (model.params?.device_ids as number[]).map((value) => Number(value))
               : [];
             const selectedForModel = selectedDevices[key] ?? activeDeviceIds;
-            const progress = runtime?.progress ?? (model.loaded ? 100 : 0);
             const stateChip = getStateChip(runtime);
             const downloaded = runtime?.downloaded ?? false;
             const serverEntries = runtime?.server ? Object.entries(runtime.server) : [];
@@ -424,7 +468,15 @@ const ModelsPage = () => {
             const isLoadingAction = loadMutation.isPending && loadMutation.variables?.key === key;
             const isDownloadingAction = downloadMutation.isPending && downloadMutation.variables === key;
             const isUnloadingAction = unloadMutation.isPending && unloadMutation.variables === key;
-            const statusMessage = runtime?.status ?? (model.loaded ? "Modèle prêt" : "Pas encore chargé");
+            const progress =
+              runtime?.progress ?? (isDownloadingAction ? 5 : model.loaded ? 100 : 0);
+            const statusMessage =
+              runtime?.status ??
+              (isDownloadingAction
+                ? "Téléchargement en cours..."
+                : model.loaded
+                ? "Modèle prêt"
+                : "Pas encore chargé");
 
             const handleDeviceChange = (event: SelectChangeEvent<string[]>) => {
               const value = event.target.value;

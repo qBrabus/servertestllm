@@ -2,7 +2,11 @@ import axios from "axios";
 
 const apiClient = axios.create({
   baseURL: "/",
-  timeout: 60000
+  // Downloads for large checkpoints can easily exceed a single minute when the
+  // server needs to fetch weights from Hugging Face. Disable the request
+  // timeout so the dashboard keeps the connection open until the backend
+  // finishes streaming progress updates.
+  timeout: 0
 });
 
 const API_KEY_STORAGE = "unified-inference-api-key";
