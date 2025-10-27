@@ -69,7 +69,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
                 speaker_diarization_module.SpeakerDiarization.__init__ = patched_init  # type: ignore[assignment]
 
-            self._download_repo(auth_token)
+            repo_path = self._download_repo(auth_token)
 
             self.update_runtime(status="Initialisation du pipeline", progress=90, downloaded=True)
 
@@ -77,10 +77,36 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             if auth_token:
                 pipeline_kwargs["use_auth_token"] = auth_token
 
-            self.pipeline = Pipeline.from_pretrained(
-                self.model_id,
-                **pipeline_kwargs,
-            )
+            from pyannote.audio.pipelines.utils import getter as pipeline_getter
+
+            original_get_model = pipeline_getter.get_model
+
+            def _expand_reference(value: Any) -> Any:
+                if isinstance(value, str) and value.startswith("$"):
+                    prefix, sep, remainder = value.partition("/")
+                    if prefix.lower() == "$model":
+                        target = Path(repo_path)
+                        if sep:
+                            target = target / remainder
+                        return str(target)
+                return value
+
+            def patched_get_model(model: Any, use_auth_token: str | None = None):  # type: ignore[override]
+                patched_model = model
+                if isinstance(model, dict):
+                    patched_model = {key: _expand_reference(val) for key, val in model.items()}
+                else:
+                    patched_model = _expand_reference(model)
+                return original_get_model(patched_model, use_auth_token=use_auth_token)
+
+            pipeline_getter.get_model = patched_get_model  # type: ignore[assignment]
+            try:
+                self.pipeline = Pipeline.from_pretrained(
+                    self.model_id,
+                    **pipeline_kwargs,
+                )
+            finally:
+                pipeline_getter.get_model = original_get_model  # type: ignore[assignment]
 
             target_gpu = self.primary_device() or 0
             torch.cuda.set_device(target_gpu)
