@@ -59,7 +59,7 @@ RUN python3 -m pip install --upgrade pip setuptools wheel && \
         torchvision==0.20.1 \
         torchaudio==2.5.1 \
         --index-url https://download.pytorch.org/whl/cu124 && \
-    python3 -m pip install --no-cache-dir -r /app/requirements.txt
+    python3 -m pip install --no-build-isolation --no-cache-dir -r /app/requirements.txt
 
 COPY backend /app/backend
 COPY --from=frontend-builder /frontend/dist /app/frontend
