@@ -11,13 +11,39 @@ const apiClient = axios.create({
 
 const API_KEY_STORAGE = "unified-inference-api-key";
 
-export const getStoredApiKey = () => localStorage.getItem(API_KEY_STORAGE);
+const canUseLocalStorage = (() => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const { localStorage } = window;
+    const testKey = "__unified_inference_storage_test__";
+    localStorage.setItem(testKey, testKey);
+    localStorage.removeItem(testKey);
+    return true;
+  } catch (error) {
+    console.warn("Local storage is not available; API keys will not persist across sessions.", error);
+    return false;
+  }
+})();
+
+export const getStoredApiKey = () => {
+  if (!canUseLocalStorage) {
+    return null;
+  }
+  return window.localStorage.getItem(API_KEY_STORAGE);
+};
 
 export const setStoredApiKey = (value: string | null) => {
+  if (!canUseLocalStorage) {
+    return;
+  }
+
   if (value) {
-    localStorage.setItem(API_KEY_STORAGE, value);
+    window.localStorage.setItem(API_KEY_STORAGE, value);
   } else {
-    localStorage.removeItem(API_KEY_STORAGE);
+    window.localStorage.removeItem(API_KEY_STORAGE);
   }
 };
 

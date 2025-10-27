@@ -56,40 +56,46 @@ docker run -d \
 
 detect_host_ips() {
   local ips=()
-  local manual_ips=()
+  local addrs=()
 
   if [[ -n "${ADVERTISED_HOSTS}" ]]; then
     while IFS= read -r entry; do
       [[ -z "${entry}" ]] && continue
-      manual_ips+=("${entry}")
+      addrs+=("${entry}")
     done < <(printf '%s' "${ADVERTISED_HOSTS}" | tr ',;' '\n' | tr ' ' '\n')
   fi
 
-  if [[ "${HOST_BIND_ADDRESS}" != "0.0.0.0" && "${HOST_BIND_ADDRESS}" != "*" ]]; then
-    manual_ips+=("${HOST_BIND_ADDRESS}")
+  if [[ ${#addrs[@]} -eq 0 ]]; then
+    if [[ "${HOST_BIND_ADDRESS}" != "0.0.0.0" && "${HOST_BIND_ADDRESS}" != "*" ]]; then
+      addrs+=("${HOST_BIND_ADDRESS}")
+    fi
+
+    if command -v ip >/dev/null 2>&1; then
+      local primary
+      primary=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; ++i) if ($i == "src") {print $(i+1); exit}}')
+      if [[ -n "${primary}" ]]; then
+        addrs+=("${primary}")
+      fi
+    fi
+
+    if [[ ${#addrs[@]} -eq 0 ]] && command -v hostname >/dev/null 2>&1; then
+      read -r -a addrs <<<"$(hostname -I 2>/dev/null)"
+    fi
   fi
 
-  if [[ ${#manual_ips[@]} -gt 0 ]]; then
-    ips+=("${manual_ips[@]}")
+  if [[ "${HOST_BIND_ADDRESS}" == "0.0.0.0" || "${HOST_BIND_ADDRESS}" == "*" ]]; then
+    addrs+=("localhost")
   fi
 
-  if command -v hostname >/dev/null 2>&1; then
-    while IFS= read -r addr; do
-      [[ -z "${addr}" ]] && continue
-      [[ "${addr}" == *:* ]] && continue
-      ips+=("${addr}")
-    done < <(hostname -I 2>/dev/null | tr ' ' '\n')
-  fi
-
-  if command -v ip >/dev/null 2>&1; then
-    while IFS= read -r addr; do
-      [[ -z "${addr}" ]] && continue
-      [[ "${addr}" == *:* ]] && continue
-      ips+=("${addr}")
-    done < <(ip -4 addr show scope global | awk '/inet / {print $2}' | cut -d/ -f1)
-  fi
-
-  ips+=("localhost")
+  for addr in "${addrs[@]}"; do
+    [[ -z "${addr}" ]] && continue
+    [[ "${addr}" == *:* ]] && continue
+    # Filter docker bridge addresses which are rarely reachable from outside the host.
+    if [[ "${addr}" == 172.17.* ]]; then
+      continue
+    fi
+    ips+=("${addr}")
+  done
 
   printf '%s\n' "${ips[@]}" | awk '!x[$0]++'
 }
