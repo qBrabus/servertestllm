@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
-from ..utils import snapshot_download_with_retry
 
 
 class QwenModel(BaseModelWrapper):
@@ -62,18 +61,17 @@ class QwenModel(BaseModelWrapper):
 
                 self.update_runtime(
                     progress=12,
-                    status="Synchronising weights",
+                    status="Préparation du cluster GPU",
                     details={
                         "tensor_parallel": tensor_parallel,
                         "preferred_device_ids": self.preferred_device_ids,
                     },
                 )
 
-                self.update_runtime(progress=35, status="Downloading Qwen weights")
                 download_root = self._download_repo(auth_token)
 
                 model_path = Path(download_root)
-                self.update_runtime(progress=55, status="Loading tokenizer", downloaded=True)
+                self.update_runtime(progress=68, status="Chargement du tokenizer", downloaded=True)
 
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     str(model_path),
@@ -97,15 +95,15 @@ class QwenModel(BaseModelWrapper):
 
                 self._engine = AsyncLLMEngine.from_engine_args(engine_args)
                 self.update_runtime(
-                    progress=92,
-                    status="vLLM engine initialised",
-                    server={
-                        "type": "vLLM",
-                        "endpoint": "/v1/chat/completions",
-                        "tensor_parallel": tensor_parallel,
-                        "visible_gpus": visible or "auto",
-                        "model_path": str(model_path),
-                    },
+                    progress=95,
+                    status="Moteur vLLM initialisé",
+                    server=self.build_server_metadata(
+                        endpoint="/v1/chat/completions",
+                        type="vLLM",
+                        tensor_parallel=tensor_parallel,
+                        visible_gpus=visible or "auto",
+                        model_path=str(model_path),
+                    ),
                 )
             except Exception:
                 if previous_visible is None:
@@ -118,20 +116,26 @@ class QwenModel(BaseModelWrapper):
         await asyncio.to_thread(_load)
 
     def _download_repo(self, auth_token: str | None) -> Path:
-        download_root = snapshot_download_with_retry(
+        return self.download_snapshot(
             repo_id=self.model_id,
-            cache_dir=str(self.cache_dir),
-            token=auth_token,
+            auth_token=auth_token,
+            status_prefix="Téléchargement des poids Qwen",
+            progress_range=(24, 60),
+            complete_status="Poids Qwen synchronisés",
             local_dir_use_symlinks=False,
         )
-        return Path(download_root)
 
     async def download(self) -> None:
         def _download():
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
-            self.update_runtime(progress=35, status="Téléchargement des poids Qwen")
-            self._download_repo(auth_token)
-            self.update_runtime(progress=55, status="Poids Qwen mis en cache", downloaded=True)
+            self.download_snapshot(
+                repo_id=self.model_id,
+                auth_token=auth_token,
+                status_prefix="Téléchargement des poids Qwen",
+                progress_range=(18, 96),
+                complete_status="Poids Qwen disponibles hors ligne",
+                local_dir_use_symlinks=False,
+            )
 
         await asyncio.to_thread(_download)
 

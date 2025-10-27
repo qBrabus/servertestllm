@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
-from ..utils import snapshot_download_with_retry
 
 
 LOGGER = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             self.update_runtime(
-                status="Validating environment",
+                status="Validation de l'environnement",
                 progress=10,
                 details={"preferred_device_ids": self.preferred_device_ids},
             )
@@ -70,17 +69,16 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
                 speaker_diarization_module.SpeakerDiarization.__init__ = patched_init  # type: ignore[assignment]
 
-            self.update_runtime(status="Downloading Pyannote artifacts", progress=45)
-            repo_path = self._download_repo(auth_token)
+            self._download_repo(auth_token)
 
-            self.update_runtime(status="Initializing pipeline", progress=90, downloaded=True)
+            self.update_runtime(status="Initialisation du pipeline", progress=90, downloaded=True)
 
             pipeline_kwargs = {"cache_dir": str(self.cache_dir)}
             if auth_token:
                 pipeline_kwargs["use_auth_token"] = auth_token
 
             self.pipeline = Pipeline.from_pretrained(
-                repo_path,
+                self.model_id,
                 **pipeline_kwargs,
             )
 
@@ -93,33 +91,40 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                     f"Impossible de déplacer Pyannote sur le GPU {target_gpu}: {exc}"
                 ) from exc
             self.update_runtime(
-                status="Pipeline ready",
+                status="Pipeline Pyannote prêt",
                 progress=98,
-                server={
-                    "type": "Pyannote",
-                    "endpoint": "/api/diarization/process",
-                    "device": f"cuda:{target_gpu}",
-                },
+                server=self.build_server_metadata(
+                    endpoint="/api/diarization/process",
+                    type="Pyannote",
+                    device=f"cuda:{target_gpu}",
+                ),
             )
 
         await asyncio.to_thread(_load)
 
     def _download_repo(self, auth_token: str | None) -> Path:
-        repo_path = snapshot_download_with_retry(
+        return self.download_snapshot(
             repo_id=self.model_id,
-            cache_dir=str(self.cache_dir),
-            token=auth_token,
-            local_dir_use_symlinks=False,
+            auth_token=auth_token,
+            status_prefix="Téléchargement Pyannote",
+            progress_range=(32, 78),
+            complete_status="Artefacts Pyannote disponibles",
             allow_patterns=["*.bin", "*.ckpt", "*.pt", "*.yaml", "*.json"],
+            local_dir_use_symlinks=False,
         )
-        return Path(repo_path)
 
     async def download(self) -> None:
         def _download():
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
-            self.update_runtime(status="Téléchargement Pyannote", progress=45)
-            self._download_repo(auth_token)
-            self.update_runtime(status="Artefacts Pyannote en cache", progress=95, downloaded=True)
+            self.download_snapshot(
+                repo_id=self.model_id,
+                auth_token=auth_token,
+                status_prefix="Téléchargement Pyannote",
+                progress_range=(28, 96),
+                complete_status="Artefacts Pyannote en cache",
+                allow_patterns=["*.bin", "*.ckpt", "*.pt", "*.yaml", "*.json"],
+                local_dir_use_symlinks=False,
+            )
 
         await asyncio.to_thread(_download)
 

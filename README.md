@@ -100,6 +100,21 @@ Chaque carte du tableau de bord propose désormais trois actions distinctes :
 - **Charger** : initialise le modèle sur GPU en réutilisant les poids présents dans le cache local.
 - **Décharger** : libère la mémoire GPU occupée par le modèle.
 
+### Tableau de bord (mise à jour octobre 2025)
+
+- Les cartes modèles affichent une barre de progression synchronisée en direct avec le téléchargement Hugging Face (la taille
+  totale du dépôt est estimée et suivie pour refléter l'état réel entre 0 et 100%).
+- Le badge « Téléchargement requis » bascule automatiquement en « Artefacts en cache » dès que les fichiers sont présents sur le
+  disque, y compris lorsqu'un modèle reste à l'état *idle*.
+- Les points d'accès exposés affichent désormais l'hôte, le port, l'URL complète, ainsi que des raccourcis pour copier les
+  endpoints REST (`/api/audio/transcribe`, `/api/diarization/process`, `/v1/chat/completions`, etc.).
+- Le panneau latéral renseigne l'utilisation CPU/RAM du serveur, les GPU disponibles et les informations de cache global
+  (modèles prêts / artefacts téléchargés).
+- Les cartes gagnent une mise en page responsive (3 colonnes en écran large, 2 sur portable, 1 sur mobile) avec un design
+  modernisé : fond en dégradé, actions compactes, sélecteur GPU enrichi.
+- Le pipeline Pyannote détecte correctement les artefacts locaux et charge le modèle via son identifiant Hugging Face, ce qui
+  supprime l'erreur `Repo id must be in the form 'repo_name'...` lors du chargement.
+
 > **Astuce navigateur** : le tableau de bord peut fonctionner en contexte « non sécurisé » (HTTP
 > sur IP privée). Lorsque le stockage local est indisponible (Firefox mode strict, Safari privé), la
 > clé API OpenAI-compatible n'est simplement pas mémorisée d'une session à l'autre au lieu de
