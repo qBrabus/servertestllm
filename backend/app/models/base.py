@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -131,12 +132,13 @@ class BaseModelWrapper(ABC):
                         state=previous_state,
                         status="Model ready",
                         downloaded=True,
+                        progress=100,
                     )
                 else:
                     self.update_runtime(
                         state="idle",
                         status="Model cached",
-                        progress=0,
+                        progress=100,
                         downloaded=True,
                     )
 
@@ -179,8 +181,29 @@ class BaseModelWrapper(ABC):
         return self.compute_cache_repo_dir(self.cache_dir, self.metadata.identifier)
 
     def is_downloaded(self) -> bool:
-        repo_dir = self.cache_repo_dir()
-        return repo_dir.exists()
+        return self.cache_has_artifacts(self.cache_dir, self.metadata.identifier)
+
+    @classmethod
+    def cache_has_artifacts(cls, cache_dir: Path, identifier: str) -> bool:
+        repo_dir = cls.compute_cache_repo_dir(cache_dir, identifier)
+        if not repo_dir.exists() or not repo_dir.is_dir():
+            return False
+
+        snapshots_dir = repo_dir / "snapshots"
+        search_roots = []
+        if snapshots_dir.exists() and snapshots_dir.is_dir():
+            search_roots.append(snapshots_dir)
+        search_roots.append(repo_dir)
+
+        for root in search_roots:
+            try:
+                next(p for p in root.rglob("*") if p.is_file())
+                return True
+            except StopIteration:
+                continue
+            except (OSError, PermissionError):  # pragma: no cover - defensive
+                continue
+        return False
 
     def update_runtime(
         self,

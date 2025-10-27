@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .base import BaseModelWrapper, ModelMetadata
+from ..utils import snapshot_download_with_retry
 
 
 class QwenModel(BaseModelWrapper):
@@ -117,9 +118,7 @@ class QwenModel(BaseModelWrapper):
         await asyncio.to_thread(_load)
 
     def _download_repo(self, auth_token: str | None) -> Path:
-        from huggingface_hub import snapshot_download
-
-        download_root = snapshot_download(
+        download_root = snapshot_download_with_retry(
             repo_id=self.model_id,
             cache_dir=str(self.cache_dir),
             token=auth_token,
