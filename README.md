@@ -75,6 +75,11 @@ Variables d'environnement principales (à exporter avant l'exécution si nécess
   le démarrage du conteneur. Utile lorsque le serveur doit rester joignable via une IP virtuelle ou
   un alias qui n'est pas détecté automatiquement.
 
+À défaut d'une liste personnalisée, `run_docker.sh` détecte désormais l'adresse source utilisée pour
+la route par défaut (via `ip route get`). Les adresses internes propres à Docker (`172.17.x.x`) et
+`localhost` ne sont plus affichées automatiquement pour éviter toute confusion lorsqu'on expose le
+service sur un réseau privé.
+
 ## Utilisation
 
 - **Tableau de bord** : `http://<hôte>:<port>/`
@@ -94,6 +99,11 @@ Chaque carte du tableau de bord propose désormais trois actions distinctes :
 - **Télécharger** : récupère les poids Hugging Face sans initialiser le runtime (utile pour préparer le cache hors ligne).
 - **Charger** : initialise le modèle sur GPU en réutilisant les poids présents dans le cache local.
 - **Décharger** : libère la mémoire GPU occupée par le modèle.
+
+> **Astuce navigateur** : le tableau de bord peut fonctionner en contexte « non sécurisé » (HTTP
+> sur IP privée). Lorsque le stockage local est indisponible (Firefox mode strict, Safari privé), la
+> clé API OpenAI-compatible n'est simplement pas mémorisée d'une session à l'autre au lieu de
+> provoquer une page blanche.
 
 La sélection des GPU a été améliorée : la liste déroulante affiche maintenant des cases à cocher pour visualiser rapidement les cartes choisies et permet de conserver le menu ouvert pour sélectionner plusieurs GPU d'affilée.
 
