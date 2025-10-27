@@ -174,9 +174,6 @@ class ModelRegistry:
                     runtime = model.runtime_status()
                 else:
                     params["device_ids"] = params.get("device_ids") or []
-                    cache_dir = BaseModelWrapper.compute_cache_repo_dir(
-                        self._cache_dir, metadata.identifier
-                    )
                     runtime = {
                         "state": "idle",
                         "progress": 0,
@@ -184,7 +181,9 @@ class ModelRegistry:
                         "details": {"preferred_device_ids": []},
                         "server": None,
                         "last_error": None,
-                        "downloaded": cache_dir.exists(),
+                        "downloaded": BaseModelWrapper.cache_has_artifacts(
+                            self._cache_dir, metadata.identifier
+                        ),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 result[key] = ModelStatus(
