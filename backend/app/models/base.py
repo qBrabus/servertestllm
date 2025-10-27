@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from ..config import settings
 
@@ -313,22 +313,60 @@ class BaseModelWrapper(ABC):
             progress=start_progress,
         )
 
+        progress_lock = threading.Lock()
+        known_total = total_bytes if total_bytes > 0 else None
+        last_progress = start_progress
+
+        def emit_progress(current_bytes: int, total: Optional[int] = None) -> None:
+            nonlocal known_total, last_progress
+            if total and total > 0:
+                known_total = total
+
+            total_to_use = total or known_total
+            if total_to_use and total_to_use > 0:
+                fraction = min(1.0, current_bytes / total_to_use)
+                mapped_progress = int(start_progress + (end_progress - start_progress) * fraction)
+                percent = int(fraction * 100)
+                with progress_lock:
+                    if mapped_progress != last_progress:
+                        last_progress = mapped_progress
+                        self.update_runtime(
+                            status=f"{status_prefix} ({percent}%)",
+                            progress=mapped_progress,
+                        )
+            else:
+                # Fall back to displaying transferred volume when total is unknown.
+                with progress_lock:
+                    self.update_runtime(
+                        status=f"{status_prefix} ({self._format_bytes(current_bytes)})",
+                    )
+
         stop_event = threading.Event()
         monitor_thread: threading.Thread | None = None
-        if total_bytes > 0:
+        if known_total is None:
             monitor_thread = threading.Thread(
                 target=self._monitor_download_progress,
-                args=(
-                    repo_dir,
-                    total_bytes,
-                    stop_event,
-                    status_prefix,
-                    start_progress,
-                    end_progress,
-                ),
+                args=(repo_dir, stop_event, emit_progress),
                 daemon=True,
             )
             monitor_thread.start()
+
+        def progress_callback(progress: Any) -> None:  # pragma: no cover - callback from hub
+            current = getattr(progress, "current", None)
+            total = getattr(progress, "total", None)
+            if current is None:
+                return
+            try:
+                current_int = int(current)
+            except (TypeError, ValueError):
+                return
+            total_int: Optional[int] = None
+            if total is not None:
+                try:
+                    total_int = int(total)
+                except (TypeError, ValueError):
+                    total_int = None
+            emit_progress(current_int, total_int)
 
         try:
             download_root = snapshot_download_with_retry(
@@ -336,6 +374,7 @@ class BaseModelWrapper(ABC):
                 cache_dir=str(self.cache_dir),
                 token=auth_token,
                 allow_patterns=list(allow_patterns) if allow_patterns else None,
+                progress_callback=progress_callback,
                 **kwargs,
             )
         except Exception:
@@ -375,25 +414,15 @@ class BaseModelWrapper(ABC):
     def _monitor_download_progress(
         self,
         repo_dir: Path,
-        total_bytes: int,
         stop_event: threading.Event,
-        status_prefix: str,
-        start_progress: int,
-        end_progress: int,
+        emit_progress: Callable[[int, Optional[int]], None],
     ) -> None:
-        last_progress = -1
+        last_bytes = -1
         while not stop_event.is_set():
             downloaded = self._estimate_local_bytes(repo_dir)
-            fraction = min(1.0, downloaded / total_bytes) if total_bytes else 0.0
-            progress = int(start_progress + (end_progress - start_progress) * fraction)
-            if progress != last_progress:
-                last_progress = progress
-                self.update_runtime(
-                    status=f"{status_prefix} ({int(fraction * 100)}%)",
-                    progress=progress,
-                )
-            if fraction >= 1.0:
-                break
+            if downloaded != last_bytes:
+                last_bytes = downloaded
+                emit_progress(downloaded, None)
             stop_event.wait(0.8)
 
     @staticmethod
@@ -411,3 +440,17 @@ class BaseModelWrapper(ABC):
         except (OSError, PermissionError):  # pragma: no cover - defensive
             return total
         return total
+
+    @staticmethod
+    def _format_bytes(num_bytes: int) -> str:
+        if num_bytes <= 0:
+            return "0 o"
+        units = ["o", "Ko", "Mo", "Go", "To"]
+        value = float(num_bytes)
+        unit_index = 0
+        while value >= 1024 and unit_index < len(units) - 1:
+            value /= 1024
+            unit_index += 1
+        if unit_index == 0:
+            return f"{int(value)} {units[unit_index]}"
+        return f"{value:.1f} {units[unit_index]}"
