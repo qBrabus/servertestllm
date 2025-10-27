@@ -10,7 +10,9 @@ ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_PROGRESS=false
 
-RUN npm ci --legacy-peer-deps
+# npm ci intermittently crashes on Node 20 with "Exit handler never called".
+# Fall back to npm install for a more reliable dependency installation in CI.
+RUN npm install --legacy-peer-deps
 COPY frontend ./
 RUN npm run build
 
