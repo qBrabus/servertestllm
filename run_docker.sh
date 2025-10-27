@@ -52,4 +52,33 @@ docker run -d \
   "${IMAGE_TAG}" \
   "$@"
 
-echo "Container ${CONTAINER_NAME} is running. Access the API at http://localhost:${HOST_PORT}".
+detect_host_ips() {
+  local ips=()
+
+  if command -v hostname >/dev/null 2>&1; then
+    while IFS= read -r addr; do
+      [[ -z "${addr}" ]] && continue
+      [[ "${addr}" == *:* ]] && continue
+      ips+=("${addr}")
+    done < <(hostname -I 2>/dev/null | tr ' ' '\n')
+  fi
+
+  if [[ ${#ips[@]} -eq 0 ]] && command -v ip >/dev/null 2>&1; then
+    while IFS= read -r addr; do
+      [[ -z "${addr}" ]] && continue
+      [[ "${addr}" == *:* ]] && continue
+      ips+=("${addr}")
+    done < <(ip -4 addr show scope global | awk '/inet / {print $2}' | cut -d/ -f1)
+  fi
+
+  ips+=("localhost")
+
+  printf '%s\n' "${ips[@]}" | awk '!x[$0]++'
+}
+
+mapfile -t available_ips < <(detect_host_ips)
+
+echo "Container ${CONTAINER_NAME} is running. Access the API at:"
+for addr in "${available_ips[@]}"; do
+  echo "  http://${addr}:${HOST_PORT}"
+done
