@@ -11,7 +11,8 @@ export const useDashboard = () => {
         return 5000;
       }
 
-      const hasActiveWork = Object.values(data.models).some((model) => {
+      const models = data.models ?? {};
+      const hasActiveWork = Object.values(models).some((model) => {
         return model.runtime?.state === "loading";
       });
 
