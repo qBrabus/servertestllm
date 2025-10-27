@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import threading
 from abc import ABC, abstractmethod
 
 from copy import deepcopy
@@ -10,6 +12,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Optional, Sequence
 
+from ..config import settings
+
 
 @dataclass
 class ModelMetadata:
@@ -18,6 +22,9 @@ class ModelMetadata:
     description: str = ""
     format: str = ""
     params: Dict[str, Any] = field(default_factory=dict)
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseModelWrapper(ABC):
@@ -241,3 +248,166 @@ class BaseModelWrapper(ABC):
         # Ensure the downloaded flag stays in sync with on-disk cache state
         snapshot["downloaded"] = snapshot.get("downloaded", False) or self.is_downloaded()
         return snapshot
+
+    # ------------------------------------------------------------------
+    # Helpers for enriched runtime information
+    # ------------------------------------------------------------------
+
+    def build_server_metadata(self, *, endpoint: str, protocol: str = "http", **extras: Any) -> Dict[str, Any]:
+        """Build a descriptive payload about an exposed API endpoint.
+
+        The returned dictionary is intended to be serialised and displayed
+        in the admin UI so we include additional convenience information
+        such as the computed URL and OpenAPI documentation entry point.
+        """
+
+        host = settings.api_host
+        port = settings.api_port
+        display_host = host
+        if host in {"0.0.0.0", "::"}:
+            display_host = "localhost"
+
+        base_url = f"{protocol}://{display_host}:{port}"
+        metadata: Dict[str, Any] = {
+            "host": host,
+            "port": port,
+            "protocol": protocol,
+            "endpoint": endpoint,
+            "url": f"{base_url}{endpoint}",
+            "docs": f"{base_url}/docs",
+            "openapi": f"{base_url}/openapi.json",
+        }
+        metadata.update(extras)
+        return metadata
+
+    # ------------------------------------------------------------------
+    # Download helpers with progress tracking
+    # ------------------------------------------------------------------
+
+    def download_snapshot(
+        self,
+        *,
+        repo_id: str,
+        auth_token: Optional[str],
+        status_prefix: str,
+        progress_range: tuple[int, int] = (5, 90),
+        allow_patterns: Sequence[str] | None = None,
+        complete_status: Optional[str] = None,
+        mark_as_cached: bool = True,
+        **kwargs: Any,
+    ) -> Path:
+        """Download a Hugging Face snapshot while updating runtime progress."""
+
+        from ..utils import snapshot_download_with_retry
+
+        start_progress, end_progress = progress_range
+        start_progress = max(0, min(100, start_progress))
+        end_progress = max(start_progress, min(100, end_progress))
+
+        repo_dir = self.compute_cache_repo_dir(self.cache_dir, repo_id)
+        total_bytes = self._resolve_remote_size(repo_id, auth_token)
+
+        # Initial status update
+        self.update_runtime(
+            status=f"{status_prefix} (0%)",
+            progress=start_progress,
+        )
+
+        stop_event = threading.Event()
+        monitor_thread: threading.Thread | None = None
+        if total_bytes > 0:
+            monitor_thread = threading.Thread(
+                target=self._monitor_download_progress,
+                args=(
+                    repo_dir,
+                    total_bytes,
+                    stop_event,
+                    status_prefix,
+                    start_progress,
+                    end_progress,
+                ),
+                daemon=True,
+            )
+            monitor_thread.start()
+
+        try:
+            download_root = snapshot_download_with_retry(
+                repo_id=repo_id,
+                cache_dir=str(self.cache_dir),
+                token=auth_token,
+                allow_patterns=list(allow_patterns) if allow_patterns else None,
+                **kwargs,
+            )
+        except Exception:
+            stop_event.set()
+            if monitor_thread:
+                monitor_thread.join(timeout=2)
+            raise
+        else:
+            stop_event.set()
+            if monitor_thread:
+                monitor_thread.join(timeout=2)
+
+        final_status = complete_status or f"{status_prefix} terminé"
+        self.update_runtime(
+            status=final_status,
+            progress=end_progress,
+            downloaded=mark_as_cached,
+        )
+        return Path(download_root)
+
+    def _resolve_remote_size(self, repo_id: str, auth_token: Optional[str]) -> int:
+        try:
+            from huggingface_hub import HfApi
+
+            api = HfApi(token=auth_token)
+            info = api.repo_info(repo_id, repo_type="model", files_metadata=True)
+            total = 0
+            for sibling in getattr(info, "siblings", []):
+                size = getattr(sibling, "size", None)
+                if isinstance(size, int):
+                    total += size
+            return total
+        except Exception as exc:  # pragma: no cover - best effort logging only
+            LOGGER.debug("Unable to resolve remote size for %s: %s", repo_id, exc)
+            return 0
+
+    def _monitor_download_progress(
+        self,
+        repo_dir: Path,
+        total_bytes: int,
+        stop_event: threading.Event,
+        status_prefix: str,
+        start_progress: int,
+        end_progress: int,
+    ) -> None:
+        last_progress = -1
+        while not stop_event.is_set():
+            downloaded = self._estimate_local_bytes(repo_dir)
+            fraction = min(1.0, downloaded / total_bytes) if total_bytes else 0.0
+            progress = int(start_progress + (end_progress - start_progress) * fraction)
+            if progress != last_progress:
+                last_progress = progress
+                self.update_runtime(
+                    status=f"{status_prefix} ({int(fraction * 100)}%)",
+                    progress=progress,
+                )
+            if fraction >= 1.0:
+                break
+            stop_event.wait(0.8)
+
+    @staticmethod
+    def _estimate_local_bytes(repo_dir: Path) -> int:
+        if not repo_dir.exists():
+            return 0
+        total = 0
+        try:
+            for path in repo_dir.rglob("*"):
+                if path.is_file():
+                    try:
+                        total += path.stat().st_size
+                    except OSError:  # pragma: no cover - transient file issues
+                        continue
+        except (OSError, PermissionError):  # pragma: no cover - defensive
+            return total
+        return total
