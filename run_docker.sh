@@ -7,6 +7,8 @@ if [[ $# -gt 0 ]]; then
 fi
 CONTAINER_NAME=${CONTAINER_NAME:-unified-inference}
 HOST_PORT=${HOST_PORT:-8000}
+HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-0.0.0.0}
+ADVERTISED_HOSTS=${ADVERTISED_HOSTS:-}
 MODEL_CACHE_DIR=${MODEL_CACHE_DIR:-$(pwd)/model_cache}
 HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-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}
 OPENAI_KEYS=${OPENAI_KEYS:-}
@@ -31,7 +33,7 @@ docker_args=(
   --gpus
   all
   -p
-  "${HOST_PORT}:8000"
+  "${HOST_BIND_ADDRESS}:${HOST_PORT}:8000"
   -e
   "HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}"
   -e
@@ -54,6 +56,22 @@ docker run -d \
 
 detect_host_ips() {
   local ips=()
+  local manual_ips=()
+
+  if [[ -n "${ADVERTISED_HOSTS}" ]]; then
+    while IFS= read -r entry; do
+      [[ -z "${entry}" ]] && continue
+      manual_ips+=("${entry}")
+    done < <(printf '%s' "${ADVERTISED_HOSTS}" | tr ',;' '\n' | tr ' ' '\n')
+  fi
+
+  if [[ "${HOST_BIND_ADDRESS}" != "0.0.0.0" && "${HOST_BIND_ADDRESS}" != "*" ]]; then
+    manual_ips+=("${HOST_BIND_ADDRESS}")
+  fi
+
+  if [[ ${#manual_ips[@]} -gt 0 ]]; then
+    ips+=("${manual_ips[@]}")
+  fi
 
   if command -v hostname >/dev/null 2>&1; then
     while IFS= read -r addr; do
@@ -63,7 +81,7 @@ detect_host_ips() {
     done < <(hostname -I 2>/dev/null | tr ' ' '\n')
   fi
 
-  if [[ ${#ips[@]} -eq 0 ]] && command -v ip >/dev/null 2>&1; then
+  if command -v ip >/dev/null 2>&1; then
     while IFS= read -r addr; do
       [[ -z "${addr}" ]] && continue
       [[ "${addr}" == *:* ]] && continue
