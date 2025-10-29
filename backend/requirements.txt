@@ -1,12 +1,12 @@
---index-url https://download.pytorch.org/whl/cu124
+--index-url https://download.pytorch.org/whl/cu126
 --extra-index-url https://pypi.org/simple
 
 # Noyau FastAPI et utilitaires
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-pydantic==2.9.2
+pydantic==2.12.3
 pydantic-settings==2.5.2
-typing_extensions==4.12.2
+typing_extensions==4.15.0
 httpx==0.27.2
 python-multipart==0.0.9
 uvloop==0.20.0
@@ -14,18 +14,18 @@ orjson==3.10.7
 aiofiles==23.2.1
 redis==5.0.8
 
-# Pile GPU / IA (versions alignées : PyTorch 2.5.1 + écosystème compatible)
-torch==2.5.1
-torchvision==0.20.1
-torchaudio==2.5.1
+# Pile GPU / IA (versions alignées : PyTorch 2.8.0 + CUDA 12.6)
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
 accelerate==1.1.1
-transformers==4.50.0
-# Align huggingface-hub with packages requiring >=0.28.1 (e.g. pyannote.audio)
-huggingface-hub==0.28.1
-# vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
-vllm==0.6.6
+transformers==4.56.0
+# Align huggingface-hub with packages requiring >=0.34.0 (transformers) et >=0.28.1 (pyannote.audio)
+huggingface-hub==0.34.1
+# vLLM 0.11.0 aligne ses contraintes sur torch/torchvision/torchaudio 2.8.0+cu126
+vllm==0.11.0
 nemo_toolkit[asr]==1.23.0
-# Pin to latest pyannote.audio release compatible with Python 3.10 wheels.
+# Pyannote 4.0.1 requiert torch>=2.8.0 ; cette pile s'appuie sur Python 3.12 et CUDA 12.6
 pyannote.audio==4.0.1
 soundfile==0.13.1
 onnx==1.16.1
