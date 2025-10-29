@@ -24,7 +24,8 @@ huggingface-hub==0.26.2
 # vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
 vllm==0.6.6
 nemo_toolkit[asr]==1.23.0
-pyannote.audio==4.1.0
+# Pin to latest pyannote.audio release compatible with Python 3.10 wheels.
+pyannote.audio==4.0.1
 soundfile==0.13.1
 onnx==1.16.1
 cmake==3.30.4
