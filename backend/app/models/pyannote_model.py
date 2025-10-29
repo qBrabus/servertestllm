@@ -89,17 +89,25 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                         if sep:
                             target = target / remainder
                         return str(target)
+                if isinstance(value, dict):
+                    return {key: _expand_reference(val) for key, val in value.items()}
+                if isinstance(value, (list, tuple, set)):
+                    expanded = [_expand_reference(item) for item in value]
+                    if isinstance(value, tuple):
+                        return tuple(expanded)
+                    if isinstance(value, set):
+                        return set(expanded)
+                    return expanded
                 return value
 
             def patched_get_model(model: Any, use_auth_token: str | None = None):  # type: ignore[override]
-                patched_model = model
-                if isinstance(model, dict):
-                    patched_model = {key: _expand_reference(val) for key, val in model.items()}
-                else:
-                    patched_model = _expand_reference(model)
+                patched_model = _expand_reference(model)
                 return original_get_model(patched_model, use_auth_token=use_auth_token)
 
+            original_speaker_get_model = getattr(speaker_diarization_module, "get_model", None)
             pipeline_getter.get_model = patched_get_model  # type: ignore[assignment]
+            if original_speaker_get_model is not None:
+                speaker_diarization_module.get_model = patched_get_model  # type: ignore[assignment]
             try:
                 self.pipeline = Pipeline.from_pretrained(
                     self.model_id,
@@ -107,6 +115,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 )
             finally:
                 pipeline_getter.get_model = original_get_model  # type: ignore[assignment]
+                if original_speaker_get_model is not None:
+                    speaker_diarization_module.get_model = original_speaker_get_model  # type: ignore[assignment]
 
             target_gpu = self.primary_device() or 0
             torch.cuda.set_device(target_gpu)

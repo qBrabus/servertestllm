@@ -77,8 +77,6 @@ const ModelsPage = () => {
   const downloadMutation = useMutation<Record<string, ModelInfo>, Error, string, DownloadMutationContext>({
     mutationFn: downloadModel,
     onMutate: async (key) => {
-      await queryClient.cancelQueries({ queryKey: ["dashboard"] });
-
       const previousState = queryClient.getQueryData<DashboardState>(["dashboard"]);
       if (previousState && previousState.models[key]) {
         const currentModel = previousState.models[key];
@@ -107,6 +105,8 @@ const ModelsPage = () => {
 
         queryClient.setQueryData(["dashboard"], nextState);
       }
+
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"], refetchType: "active" });
 
       return { previousState };
     },

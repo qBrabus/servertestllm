@@ -30,6 +30,7 @@ async def _collect_model_info() -> dict[str, ModelInfo]:
             description=info.description,
             format=info.format,
             params=info.params,
+            runtime=info.runtime,
         )
         for key, info in models_raw.items()
     }
