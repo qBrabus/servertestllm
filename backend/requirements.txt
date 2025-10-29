@@ -31,6 +31,23 @@ soundfile==0.13.1
 onnx==1.16.1
 cmake==3.30.4
 
+# Dépendances transitives critiques figées pour limiter le backtracking pip
+importlib-metadata==8.6.1
+opentelemetry-api==1.37.0
+openai-harmony==0.0.3
+prometheus-client==0.22.1
+jiter==0.11.0
+distro==1.9.0
+openai==2.6.0
+jsonschema==4.25.0
+jsonschema-specifications==2024.10.1
+kiwisolver==1.4.7
+fonttools==4.59.2
+contourpy==1.2.0
+matplotlib==3.10.0
+MarkupSafe==3.0.2
+tqdm==4.66.5
+
 # Dépendances explicites pour stabiliser la résolution pip
 Cython==0.29.37
 numpy==1.26.4
