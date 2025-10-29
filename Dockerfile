@@ -61,7 +61,7 @@ RUN set -eux; \
 WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
-RUN python3 -m pip install --upgrade pip setuptools wheel && \
+RUN python3 -m pip install --upgrade pip setuptools wheel meson-python meson && \
     python3 -m pip install --no-cache-dir \
         numpy==1.26.4 \
         Cython==0.29.37 \
