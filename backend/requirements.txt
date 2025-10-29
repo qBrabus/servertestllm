@@ -20,7 +20,8 @@ torchvision==0.20.1
 torchaudio==2.5.1
 accelerate==1.1.1
 transformers==4.50.0
-huggingface-hub==0.26.2
+# Align huggingface-hub with packages requiring >=0.28.1 (e.g. pyannote.audio)
+huggingface-hub==0.28.1
 # vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
 vllm==0.6.6
 nemo_toolkit[asr]==1.23.0
