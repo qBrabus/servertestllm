@@ -19,12 +19,12 @@ torch==2.5.1
 torchvision==0.20.1
 torchaudio==2.5.1
 accelerate==1.1.1
-transformers==4.48.3
-huggingface-hub==0.25.2
+transformers==4.50.0
+huggingface-hub==0.26.2
 # vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
 vllm==0.6.6
 nemo_toolkit[asr]==1.23.0
-pyannote.audio==3.3.2
+pyannote.audio==4.1.0
 soundfile==0.13.1
 onnx==1.16.1
 cmake==3.30.4

@@ -16,6 +16,7 @@ from ..schemas.admin import (
 from ..services.gpu_monitor import gpu_monitor
 from ..services.model_registry import registry
 from ..services.token_store import token_store
+from ..services.dependency_inspector import gather_dependency_status
 
 router = APIRouter(tags=["admin"])
 
@@ -52,7 +53,13 @@ async def get_status() -> DashboardState:
     ]
     system = SystemMetrics(**gpu_monitor.system_metrics())
     models = await _collect_model_info()
-    return DashboardState(gpus=gpus, system=system, models=models)
+    dependencies = gather_dependency_status()
+    return DashboardState(
+        gpus=gpus,
+        system=system,
+        models=models,
+        dependencies=dependencies,
+    )
 
 
 @router.post("/models/{model_key}/load")

@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 
 import { useDashboard } from "../hooks/useDashboard";
+import TorchStackCard from "../components/TorchStackCard";
 
 const DashboardPage = () => {
   const { data, isLoading } = useDashboard();
@@ -52,6 +53,9 @@ const DashboardPage = () => {
               />
             </CardContent>
           </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <TorchStackCard dependencies={data?.dependencies ?? []} />
         </Grid>
         <Grid item xs={12}>
           <Card>

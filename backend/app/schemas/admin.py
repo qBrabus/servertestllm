@@ -20,6 +20,14 @@ class SystemMetrics(BaseModel):
     memory_percent: float
 
 
+class DependencyStatus(BaseModel):
+    name: str
+    version: str | None = None
+    cuda: bool | None = None
+    details: Dict[str, object] | None = None
+    error: str | None = None
+
+
 class ModelRuntimeInfo(BaseModel):
     state: Literal["idle", "loading", "ready", "error"]
     progress: int
@@ -53,6 +61,7 @@ class DashboardState(BaseModel):
     gpus: List[GPUInfo]
     system: SystemMetrics
     models: Dict[str, ModelInfo]
+    dependencies: List[DependencyStatus]
 
 
 class HuggingFaceTokenStatus(BaseModel):
