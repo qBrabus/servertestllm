@@ -19,7 +19,7 @@ torch==2.5.1
 torchvision==0.20.1
 torchaudio==2.5.1
 accelerate==1.1.1
-transformers==4.46.1
+transformers==4.48.3
 huggingface-hub==0.25.2
 # vLLM >=0.6.4 est compatible avec torch/torchvision/torchaudio 2.5.1
 vllm==0.6.6

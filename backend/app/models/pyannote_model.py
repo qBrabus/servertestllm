@@ -81,6 +81,31 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             original_get_model = pipeline_getter.get_model
 
+            def _resolve_local_artifact(path: Path) -> Path | None:
+                """Return the first plausible checkpoint file under ``path``."""
+
+                if path.is_file():
+                    return path
+                if not path.exists():
+                    return None
+
+                candidate_patterns = (
+                    "*.safetensors",
+                    "*.bin",
+                    "*.ckpt",
+                    "*.pt",
+                    "*.pth",
+                )
+                for pattern in candidate_patterns:
+                    matches = sorted(path.glob(pattern))
+                    if matches:
+                        return matches[0]
+                for pattern in candidate_patterns:
+                    matches = sorted(path.rglob(pattern))
+                    if matches:
+                        return matches[0]
+                return None
+
             def _expand_reference(value: Any) -> Any:
                 if isinstance(value, str) and value.startswith("$"):
                     prefix, sep, remainder = value.partition("/")
@@ -88,7 +113,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                         target = Path(repo_path)
                         if sep:
                             target = target / remainder
-                        return str(target)
+                        resolved = _resolve_local_artifact(target)
+                        return str(resolved or target)
                 if isinstance(value, dict):
                     return {key: _expand_reference(val) for key, val in value.items()}
                 if isinstance(value, (list, tuple, set)):
@@ -100,8 +126,31 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                     return expanded
                 return value
 
+            def _normalise_local_paths(value: Any) -> Any:
+                if isinstance(value, str):
+                    try:
+                        candidate = Path(value)
+                    except (OSError, TypeError, ValueError):
+                        return value
+                    resolved = _resolve_local_artifact(candidate)
+                    if resolved is not None:
+                        return str(resolved)
+                    if candidate.exists():
+                        return str(candidate)
+                    return value
+                if isinstance(value, dict):
+                    return {key: _normalise_local_paths(val) for key, val in value.items()}
+                if isinstance(value, list):
+                    return [_normalise_local_paths(item) for item in value]
+                if isinstance(value, tuple):
+                    return tuple(_normalise_local_paths(item) for item in value)
+                if isinstance(value, set):
+                    return {_normalise_local_paths(item) for item in value}
+                return value
+
             def patched_get_model(model: Any, use_auth_token: str | None = None):  # type: ignore[override]
                 patched_model = _expand_reference(model)
+                patched_model = _normalise_local_paths(patched_model)
                 return original_get_model(patched_model, use_auth_token=use_auth_token)
 
             original_speaker_get_model = getattr(speaker_diarization_module, "get_model", None)
