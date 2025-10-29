@@ -86,6 +86,14 @@ export interface ModelStatus {
   runtime?: ModelRuntimeInfo | null;
 }
 
+export interface DependencyStatus {
+  name: string;
+  version?: string | null;
+  cuda?: boolean | null;
+  details?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
 export interface DashboardState {
   gpus: GPUStatus[];
   system: {
@@ -93,6 +101,7 @@ export interface DashboardState {
     memory_percent: number;
   };
   models: Record<string, ModelStatus>;
+  dependencies: DependencyStatus[];
 }
 
 export interface HuggingFaceTokenStatus {

@@ -42,10 +42,19 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         def _load():
             import torch
             from pyannote.audio import Pipeline
+            import pyannote.audio as pyannote_audio
             from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger le pipeline Pyannote")
+
+            version_tokens = [int(part) for part in pyannote_audio.__version__.split(".") if part.isdigit()][:3]
+            version_tuple = tuple(version_tokens + [0] * (3 - len(version_tokens)))
+            if version_tuple < (4, 0, 0):
+                raise RuntimeError(
+                    "pyannote.audio >= 4.0.0 est requis pour ce pipeline. "
+                    f"Version détectée: {pyannote_audio.__version__}."
+                )
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             self.update_runtime(
@@ -76,6 +85,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             pipeline_kwargs = {"cache_dir": str(self.cache_dir)}
             if auth_token:
                 pipeline_kwargs["use_auth_token"] = auth_token
+                pipeline_kwargs["token"] = auth_token
 
             from pyannote.audio.pipelines.utils import getter as pipeline_getter
 
