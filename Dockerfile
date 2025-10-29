@@ -33,7 +33,6 @@ RUN apt-get update && \
     python3.12 \
     python3.12-dev \
     python3.12-venv \
-    python3.12-distutils \
     build-essential \
     ninja-build \
     cmake \
@@ -52,8 +51,10 @@ RUN set -eux; \
     if [ -x /usr/bin/python3.10 ]; then \
         update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 10; \
     fi; \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 20; \
-    update-alternatives --set python3 /usr/bin/python3.12; \
+    if [ -x /usr/bin/python3.12 ]; then \
+        update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 20; \
+        update-alternatives --set python3 /usr/bin/python3.12; \
+    fi; \
     python3 -m ensurepip; \
     python3 -m pip install --upgrade pip
 
