@@ -1,142 +1,188 @@
-# Passerelle d'Inférence Unifiée
+# Passerelle d'inférence unifiée
 
-Ce projet réunit dans un même conteneur GPU une API de conversation OpenAI-compatible, un service de reconnaissance vocale Canary (.nemo), ainsi qu'un pipeline de diarisation Pyannote. L'ensemble du code et de la documentation est désormais en français pour faciliter la maintenance de l'équipe. Toutes les inférences sont exécutées sur GPU (DGX 8xH200, CUDA >= 12.4) – aucun retour n'est prévu sur CPU en dehors d'opérations annexes inévitables (lecture disque, pré/post-traitements légers).
+Cette plateforme regroupe, dans un seul déploiement GPU, trois services d'IA complémentaires :
+
+- **Qwen3 VL 30B** pour les conversations multimodales (servi par vLLM) ;
+- **NVIDIA Canary** pour la transcription automatique multilingue ;
+- **Pyannote** pour la diarisation des locuteurs.
+
+L'API FastAPI expose des endpoints compatibles OpenAI ainsi que des routes audio spécialisées, tandis qu'une interface React offre une supervision temps réel (progression des téléchargements, état VRAM, dépendances CUDA). Toute la documentation et les messages sont en français afin de faciliter la maintenance interne.
+
+## Table des matières
+
+1. [Architecture](#architecture)
+2. [Fonctionnalités principales](#fonctionnalités-principales)
+3. [Prérequis](#prérequis)
+4. [Structure du dépôt](#structure-du-dépôt)
+5. [Installation locale](#installation-locale)
+6. [Construction et exécution Docker](#construction-et-exécution-docker)
+7. [Utilisation des APIs](#utilisation-des-apis)
+8. [Supervision & tableau de bord](#supervision--tableau-de-bord)
+9. [Tests et vérifications](#tests-et-vérifications)
+10. [Documentation additionnelle](#documentation-additionnelle)
+
+## Architecture
+
+Le système s'articule autour de trois briques :
+
+- un **backend FastAPI** (`backend/app`) qui gère le cycle de vie des modèles, les téléchargements Hugging Face et les routes REST ;
+- des **wrappers de modèles** héritant d'un socle commun (`BaseModelWrapper`) pour orchestrer vLLM, NeMo et Pyannote ;
+- un **tableau de bord React** (Vite + Material UI) servi en statique depuis FastAPI.
+
+Un registre central (`ModelRegistry`) maintient la liste des modèles, applique les préférences GPU et expose l'état des opérations au front. `GPUMonitor` collecte la télémétrie (charge, VRAM, température), tandis que `dependency_inspector` vérifie la cohérence de la pile CUDA. Un schéma détaillé et les flux d'appels sont disponibles dans [`doc/architecture.md`](doc/architecture.md).
 
 ## Fonctionnalités principales
 
-- **LLM Qwen3 VL 30B** servi par [vLLM](https://github.com/vllm-project/vllm) pour des réponses rapides et stables.
-- **ASR multilingue NVIDIA Canary** (`.nemo`) via [NeMo Toolkit](https://github.com/NVIDIA/NeMo) avec exécution exclusivement sur GPU.
-- **Diarisation Pyannote** avec transfert systématique du pipeline sur GPU.
-- **API OpenAI-compatible** : `POST /v1/chat/completions` et `POST /v1/completions`.
-- **API audio** : `POST /api/audio/transcribe` (transcription) et `POST /api/diarization/process` (diarisation).
-- **Tableau de bord React** (Vite + Material UI) pour surveiller l'état des modèles, l'utilisation GPU et exécuter des requêtes.
+- **API OpenAI-compatible** : `POST /v1/chat/completions` et `POST /v1/completions` avec calcul des tokens consommés.
+- **Transcription audio** : `POST /api/audio/transcribe` (Canary ASR) avec rééchantillonnage automatique.
+- **Diarisation** : `POST /api/diarization/process` (Pyannote) renvoyant les segments (speaker, start, end).
+- **Administration** : `GET /api/admin/status` pour l'état global, `POST /api/admin/models/{clé}/(download|load|unload)` pour piloter chaque modèle, `POST /api/admin/huggingface/token` pour gérer le jeton HF.
+- **Interface web** : suivi temps réel des téléchargements, affichage des endpoints exposés, gestion des clés API, actions rapides.
+- **Suivi GPU** : collecte continue de l'utilisation mémoire, de la charge et de la température sur chaque carte.
 
 ## Prérequis
 
-- Python 3.10 (testé) si vous lancez le backend hors conteneur.
-- Docker 24+ avec le runtime NVIDIA ou `nvidia-docker2` pour l'exécution conteneurisée.
-- Pilotes NVIDIA compatibles CUDA 12.4 et accès à un serveur DGX 8xH200.
-- Un jeton Hugging Face (`HUGGINGFACE_TOKEN`) autorisant le téléchargement des modèles Canary et Pyannote.
-- Accès réseau à Hugging Face (les modèles sont tirés dynamiquement).
+- **Matériel** : GPU NVIDIA compatible CUDA ≥ 12.4 (plateforme cible : DGX 8×H200).
+- **Système** : pilotes NVIDIA et `nvidia-container-toolkit` à jour pour l'exécution conteneurisée.
+- **Réseau** : accès à Hugging Face avec un jeton `HUGGINGFACE_TOKEN` autorisant `nvidia/canary-1b-v2` et `pyannote/speaker-diarization-community-1`.
+- **Logiciel (mode local)** : Python 3.10+, `pip`, `virtualenv`.
 
-## Installation locale (hors Docker)
+## Structure du dépôt
 
-1. Créez un environnement virtuel Python 3.10 :
+```text
+.
+├── backend/              # Application FastAPI (routes, services, modèles, schémas)
+├── frontend/             # Tableau de bord React (Vite, Material UI)
+├── doc/                  # Documentation technique détaillée
+├── Dockerfile            # Construction multi-étapes GPU-ready
+├── build_docker.sh       # Build script (frontend -> backend)
+├── run_docker.sh         # Script de lancement avec GPU & cache modèles
+└── README.md             # Ce document
+```
+
+Les dossiers `backend/app/models` et `backend/app/services` sont décrits en profondeur dans [`doc/backend.md`](doc/backend.md). Le frontend est détaillé dans [`doc/frontend.md`](doc/frontend.md).
+
+## Installation locale
+
+> ⚠️ Tous les modèles exigent un GPU CUDA visible. Les commandes suivantes ne suffisent pas en environnement CPU-only.
+
+1. Créer l'environnement virtuel Python 3.10 :
    ```bash
    python3.10 -m venv .venv
    source .venv/bin/activate
    python -m pip install --upgrade pip
    ```
-2. Installez les dépendances backend (les URLs nécessaires pour les roues CUDA sont intégrées au fichier) :
+2. Installer les dépendances backend (URLs CUDA incluses dans `requirements.txt`) :
    ```bash
    pip install -r backend/requirements.txt
    ```
-3. Exportez les variables requises (au minimum le jeton Hugging Face) :
+3. Exporter les variables minimales :
    ```bash
-   export HUGGINGFACE_TOKEN="<token>"
+   export HUGGINGFACE_TOKEN="<votre_token>"
    export MODEL_CACHE_DIR="$(pwd)/model_cache"
+   export OPENAI_API_KEYS="cle1,cle2"   # optionnel
    ```
-4. Lancez l'API FastAPI en local :
+4. Lancer l'API FastAPI :
    ```bash
    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
-
-> **Important** : Les modèles refuseront de se charger si aucun GPU n'est visible (`CUDA_VISIBLE_DEVICES`). Pensez à vérifier `nvidia-smi` avant de démarrer.
+5. (Optionnel) Servir le frontend en développement :
+   ```bash
+   cd frontend
+   npm install
+   npm run dev -- --host
+   ```
+   Configurer le proxy Vite (`vite.config.ts`) pour rediriger `/api` et `/v1` vers `http://localhost:8000`.
 
 ## Construction et exécution Docker
 
-### Construction
+### Build
 
-Le script `build_docker.sh` orchestre la construction multi-étapes (frontend puis backend) :
-
+Le script [`build_docker.sh`](build_docker.sh) orchestre la construction multi-étapes (frontend puis backend) :
 ```bash
 ./build_docker.sh mon-image:latest
 ```
 
-Le `Dockerfile` s'appuie sur `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`, installe Node 20 pour le frontend, puis FastAPI/vLLM/NeMo/Pyannote côté backend avec les roues CUDA fournies par NVIDIA. L'étape système installe désormais `apt-utils` en amont afin d'éviter l'avertissement `debconf: delaying package configuration` lors des builds.
+- Base : `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`
+- Étape frontend : Node 20 + build Vite
+- Étape backend : installation Python, vLLM, NeMo, Pyannote, GPUtil, etc.
+- `apt-utils` est installé en amont pour éviter l'erreur `debconf: delaying package configuration`.
 
-### Exécution
-
-Le script suivant publie le port 8000, partage le cache de modèles et rend tous les GPU visibles :
+### Run
 
 ```bash
 ./run_docker.sh mon-image:latest
 ```
 
-Variables d'environnement principales (à exporter avant l'exécution si nécessaire) :
+Options principales (exporter avant exécution) :
 
-- `HUGGINGFACE_TOKEN` : jeton Hugging Face obligatoire pour Canary et Pyannote.
-- `OPENAI_KEYS` : chaîne de clés API séparées par des virgules pour sécuriser les routes OpenAI (facultatif, accès libre sinon).
-- `MODEL_CACHE_DIR` : répertoire hôte pour la mise en cache (`./model_cache` par défaut).
-- `HOST_PORT` : port hôte mappé sur `8000` (par défaut `8000`).
-- `HOST_BIND_ADDRESS` : adresse d'écoute côté hôte passée à `docker -p`. Permet par exemple de forcer
-  la publication uniquement sur `10.200.50.46` si l'accès doit rester sur cette IP.
-- `ADVERTISED_HOSTS` : liste d'adresses (séparées par des virgules ou des espaces) à afficher après
-  le démarrage du conteneur. Utile lorsque le serveur doit rester joignable via une IP virtuelle ou
-  un alias qui n'est pas détecté automatiquement.
+| Variable | Rôle |
+|----------|------|
+| `HUGGINGFACE_TOKEN` | Jeton HF obligatoire pour Canary & Pyannote. |
+| `OPENAI_API_KEYS` | Liste de clés autorisées pour `/v1/*` (sinon accès libre). |
+| `MODEL_CACHE_DIR` | Dossier hôte monté sur `/models` (cache persistant recommandé). |
+| `HOST_PORT` | Port hôte mappé sur `8000` (défaut : `8000`). |
+| `HOST_BIND_ADDRESS` | Adresse d'écoute côté hôte (permet de restreindre la publication). |
+| `ADVERTISED_HOSTS` | Liste d'adresses à afficher une fois le conteneur démarré. |
 
-À défaut d'une liste personnalisée, `run_docker.sh` détecte désormais l'adresse source utilisée pour
-la route par défaut (via `ip route get`). Les adresses internes propres à Docker (`172.17.x.x`) et
-`localhost` ne sont plus affichées automatiquement pour éviter toute confusion lorsqu'on expose le
-service sur un réseau privé.
+Le script rend tous les GPU visibles (`--gpus all`) et affiche automatiquement l'URL d'accès (`http://<adresse>:<port>`), en filtrant les IP Docker internes pour éviter la confusion.
 
-## Utilisation
+## Utilisation des APIs
 
-- **Tableau de bord** : `http://<hôte>:<port>/`
-- **API OpenAI** : `http://<hôte>:<port>/v1/chat/completions` et `/v1/completions`
-- **Transcription audio** : `http://<hôte>:<port>/api/audio/transcribe`
-- **Diarisation** : `http://<hôte>:<port>/api/diarization/process`
-- **Administration** : `GET /api/admin/status`, `POST /api/admin/models/{clé}/download`, `POST /api/admin/models/{clé}/load`, `POST /api/admin/models/{clé}/unload`
+### Endpoints principaux
 
-Clés modèles disponibles :
+| Endpoint | Description | Modèle cible |
+|----------|-------------|---------------|
+| `POST /v1/chat/completions` | Chat completion compatible OpenAI. | Qwen3 VL 30B |
+| `POST /v1/completions` | Complétion texte simple. | Qwen3 VL 30B |
+| `POST /api/audio/transcribe` | Transcription audio (fichier `multipart/form-data`). | NVIDIA Canary |
+| `POST /api/diarization/process` | Diarisation audio (segments JSON). | Pyannote |
+| `GET /api/admin/status` | État global (GPU, dépendances, modèles). | Tous |
+| `POST /api/admin/models/{clé}/download` | Pré-télécharge les artefacts HF. | Tous |
+| `POST /api/admin/models/{clé}/load` | Charge le modèle sur GPU (option `gpu_device_ids`). | Tous |
+| `POST /api/admin/models/{clé}/unload` | Libère la VRAM. | Tous |
+| `POST /api/admin/huggingface/token` | Met à jour/persiste le jeton HF. | N/A |
 
-- `qwen` — LLM multimodal (vLLM)
-- `canary` — ASR NeMo
-- `pyannote` — Diarisation
+Les clés valides pour `{clé}` sont `qwen`, `canary`, `pyannote`. Le détail de chaque wrapper (paramètres, contraintes) est documenté dans [`doc/modeles.md`](doc/modeles.md).
 
-Chaque carte du tableau de bord propose désormais trois actions distinctes :
+### Gestion des clés API `/v1`
 
-- **Télécharger** : récupère les poids Hugging Face sans initialiser le runtime (utile pour préparer le cache hors ligne).
-- **Charger** : initialise le modèle sur GPU en réutilisant les poids présents dans le cache local.
-- **Décharger** : libère la mémoire GPU occupée par le modèle.
+- Définir `OPENAI_API_KEYS="cle1,cle2"` côté serveur.
+- Le frontend propose un dialogue (icône cadenas dans la barre supérieure) pour enregistrer la clé côté navigateur.
+- Les requêtes clients doivent fournir `Authorization: Bearer <clé>`.
 
-### Tableau de bord (mise à jour octobre 2025)
+## Supervision & tableau de bord
 
-- Les cartes modèles affichent une barre de progression synchronisée en direct avec le téléchargement Hugging Face (la taille
-  totale du dépôt est estimée et suivie pour refléter l'état réel entre 0 et 100%).
-- Le badge « Téléchargement requis » bascule automatiquement en « Artefacts en cache » dès que les fichiers sont présents sur le
-  disque, y compris lorsqu'un modèle reste à l'état *idle*.
-- Les points d'accès exposés affichent désormais l'hôte, le port, l'URL complète, ainsi que des raccourcis pour copier les
-  endpoints REST (`/api/audio/transcribe`, `/api/diarization/process`, `/v1/chat/completions`, etc.).
-- Le panneau latéral renseigne l'utilisation CPU/RAM du serveur, les GPU disponibles et les informations de cache global
-  (modèles prêts / artefacts téléchargés).
-- Les cartes gagnent une mise en page responsive (3 colonnes en écran large, 2 sur portable, 1 sur mobile) avec un design
-  modernisé : fond en dégradé, actions compactes, sélecteur GPU enrichi.
-- Le pipeline Pyannote détecte correctement les artefacts locaux et charge le modèle via son identifiant Hugging Face, ce qui
-  supprime l'erreur `Repo id must be in the form 'repo_name'...` lors du chargement.
+- Accès par défaut : `http://<hôte>:<port>/`
+- Cartes modèles : progression du téléchargement, état (`idle`, `loading`, `ready`, `error`), actions Télécharger/Charger/Décharger.
+- Panneau latéral : GPU (nom, VRAM utilisée/total, température), métriques système (CPU/RAM), dépendances CUDA (torch, torchvision, torchaudio).
+- Les endpoints exposés sont listés avec l'URL complète, les raccourcis (copier) et la documentation OpenAPI (`/docs`).
+- `useDashboard` adapte l'intervalle de rafraîchissement : 1 s pendant les chargements, 5 s au repos.
 
-> **Astuce navigateur** : le tableau de bord peut fonctionner en contexte « non sécurisé » (HTTP
-> sur IP privée). Lorsque le stockage local est indisponible (Firefox mode strict, Safari privé), la
-> clé API OpenAI-compatible n'est simplement pas mémorisée d'une session à l'autre au lieu de
-> provoquer une page blanche.
+Pour une description complète des composants React et des flux de données, se référer à [`doc/frontend.md`](doc/frontend.md).
 
-La sélection des GPU a été améliorée : la liste déroulante affiche maintenant des cases à cocher pour visualiser rapidement les cartes choisies et permet de conserver le menu ouvert pour sélectionner plusieurs GPU d'affilée.
+## Tests et vérifications
 
-## Notes techniques
-
-- Le répertoire `/models` (ou la valeur de `MODEL_CACHE_DIR`) est partagé entre tous les services et persiste entre deux démarrages pour éviter de re-télécharger les poids.
-- Les scripts d'inférence convertissent systématiquement les entrées audio en tenseurs PyTorch et utilisent `torchaudio` pour le resampling, supprimant toute dépendance à Librosa/Numba.
-- Qwen est chargé via `AsyncLLMEngine` de vLLM avec `tensor_parallel_size=1` par défaut ; le registre de modèles autorise toutefois la mise à jour dynamique des préférences GPU.
-- Chaque wrapper vérifie explicitement la disponibilité CUDA et déclenche une erreur claire si aucun GPU n'est visible.
-- Les dépendances Python critiques sont figées (`backend/requirements.txt`) pour éviter les erreurs `resolution-too-deep` de pip.
-
-## Tests et maintenance
-
-- Le backend suit une structure FastAPI classique (`backend/app`). Le point d'entrée est `app.main:app`.
-- Pour vérifier la validité du code Python sans lancer les modèles (notamment en CI CPU-only), vous pouvez exécuter :
+- **Validation statique** (environnement CPU) :
   ```bash
   python -m compileall backend/app
   ```
-- Les modèles ne sont chargés que sur demande (lazy loading). Vous pouvez forcer le chargement au démarrage via `LAZY_LOAD_MODELS=false`.
+- **Lint/TypeScript frontend** :
+  ```bash
+  cd frontend
+  npm run lint
+  npm run typecheck
+  ```
+- **Contrôle des dépendances GPU** : appeler `GET /api/admin/status` et vérifier la section `dependencies` (doit indiquer `cuda: true`).
 
-Bon usage ! Toute contribution doit conserver ces contraintes GPU et la documentation en français.
+L'exécution d'inférences effectives nécessite un GPU CUDA disponible. En CI CPU-only, se limiter à la compilation et aux linters.
+
+## Documentation additionnelle
+
+- [`doc/architecture.md`](doc/architecture.md) : schémas, flux d'appels et vue d'ensemble du système.
+- [`doc/backend.md`](doc/backend.md) : analyse des modules FastAPI, services et wrappers.
+- [`doc/frontend.md`](doc/frontend.md) : structure du tableau de bord, interactions avec l'API.
+- [`doc/operations.md`](doc/operations.md) : bonnes pratiques de déploiement, gestion du cache, dépannage rapide.
+- [`doc/modeles.md`](doc/modeles.md) : fiches techniques des modèles (contraintes GPU, taille, particularités).
+
+Bon usage ! Toute contribution doit conserver l'exécution GPU-only, les épingles de dépendances et la documentation en français.
