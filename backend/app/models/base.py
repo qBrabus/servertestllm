@@ -316,9 +316,10 @@ class BaseModelWrapper(ABC):
         progress_lock = threading.Lock()
         known_total = total_bytes if total_bytes > 0 else None
         last_progress = start_progress
+        fallback_progress = start_progress
 
         def emit_progress(current_bytes: int, total: Optional[int] = None) -> None:
-            nonlocal known_total, last_progress
+            nonlocal known_total, last_progress, fallback_progress
             if total and total > 0:
                 known_total = total
 
@@ -337,9 +338,17 @@ class BaseModelWrapper(ABC):
             else:
                 # Fall back to displaying transferred volume when total is unknown.
                 with progress_lock:
-                    self.update_runtime(
-                        status=f"{status_prefix} ({self._format_bytes(current_bytes)})",
-                    )
+                    next_message = f"{status_prefix} ({self._format_bytes(current_bytes)})"
+                    if last_progress < end_progress - 1:
+                        step = max(1, (end_progress - start_progress) // 15)
+                        fallback_progress = max(fallback_progress, last_progress)
+                        candidate = min(end_progress - 1, fallback_progress + step)
+                        if candidate != last_progress:
+                            last_progress = candidate
+                            fallback_progress = candidate
+                            self.update_runtime(status=next_message, progress=candidate)
+                            return
+                    self.update_runtime(status=next_message)
 
         stop_event = threading.Event()
         monitor_thread: threading.Thread | None = None
