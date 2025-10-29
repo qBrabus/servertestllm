@@ -36,6 +36,7 @@ RUN apt-get update && \
     build-essential \
     ninja-build \
     cmake \
+    pkg-config \
     git \
     wget \
     curl \
@@ -66,6 +67,8 @@ RUN python3 -m pip install --upgrade pip setuptools wheel meson-python meson && 
         numpy==1.26.4 \
         Cython==0.29.37 \
         typing_extensions==4.15.0 && \
+    python3 -m pip install --no-cache-dir \
+        pybind11==2.13.5 && \
     python3 -m pip install --no-cache-dir \
         torch==2.8.0 \
         torchvision==0.23.0 \
