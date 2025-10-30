@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     api_host: str = Field("0.0.0.0", env="API_HOST")
     api_port: int = Field(8000, env="API_PORT")
     log_level: str = Field("info", env="LOG_LEVEL")
+    log_dir: Path = Field(Path("/var/log/servertestllm"), env="LOG_DIR")
+    log_file_name: str = Field("backend.log", env="LOG_FILE_NAME")
+    log_max_bytes: int = Field(10 * 1024 * 1024, env="LOG_MAX_BYTES")
+    log_backup_count: int = Field(5, env="LOG_BACKUP_COUNT")
 
     # Hugging Face token for downloading gated models
     huggingface_token: str | None = Field(None, env="HUGGINGFACE_TOKEN")
