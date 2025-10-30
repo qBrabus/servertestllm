@@ -80,7 +80,7 @@ class QwenModel(BaseModelWrapper):
                     trust_remote_code=True,
                 )
 
-                engine_args = AsyncEngineArgs(
+                engine_kwargs = dict(
                     model=str(model_path),
                     tokenizer=str(model_path),
                     tensor_parallel_size=tensor_parallel,
@@ -90,8 +90,15 @@ class QwenModel(BaseModelWrapper):
                     gpu_memory_utilization=0.90,
                     max_model_len=8192,
                     enforce_eager=True,
-                    worker_use_ray=False,
                 )
+
+                import inspect
+
+                signature = inspect.signature(AsyncEngineArgs)
+                if "worker_use_ray" in signature.parameters:
+                    engine_kwargs["worker_use_ray"] = False
+
+                engine_args = AsyncEngineArgs(**engine_kwargs)
 
                 self._engine = AsyncLLMEngine.from_engine_args(engine_args)
                 self.update_runtime(

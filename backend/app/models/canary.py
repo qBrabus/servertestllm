@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import io
 import os
 from pathlib import Path
@@ -48,6 +49,18 @@ class CanaryASRModel(BaseModelWrapper):
                     all_values = set(huggingface_hub.__all__)
                     all_values.add("ModelFilter")
                     huggingface_hub.__all__ = tuple(all_values)  # type: ignore[assignment]
+
+            try:
+                importlib.import_module("nemo.collections.asr.models")
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "Le toolkit NVIDIA NeMo n'est pas installé. Installez-le via "
+                    "pip install 'nemo_toolkit[asr]' pour activer Canary."
+                ) from exc
+            except Exception as exc:  # pragma: no cover - dépend des bindings CUDA
+                raise RuntimeError(
+                    "Échec du chargement de nemo.collections. Vérifiez la compatibilité CUDA/CuDNN de votre installation NeMo."
+                ) from exc
 
             from nemo.collections.asr.models import ASRModel
 
@@ -132,7 +145,8 @@ class CanaryASRModel(BaseModelWrapper):
             import soundfile as sf
             import tempfile
             import torch
-            import torchaudio.functional as F
+
+            from app.utils.audio import ensure_mono, resample_waveform
 
             if self._pipeline is None:
                 raise RuntimeError("Le modèle Canary n'est pas chargé")
@@ -142,13 +156,10 @@ class CanaryASRModel(BaseModelWrapper):
                 return {"text": "", "sampling_rate": target_sr}
 
             audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
-            if audio_array.ndim > 1:
-                audio_array = audio_array.mean(axis=1)
             waveform = torch.from_numpy(audio_array)
-            if waveform.ndim == 1:
-                waveform = waveform.unsqueeze(0)
+            waveform = ensure_mono(waveform)
             if sr != target_sr:
-                waveform = F.resample(waveform, sr, target_sr)
+                waveform = resample_waveform(waveform, sr, target_sr)
             waveform = waveform.squeeze(0).contiguous()
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

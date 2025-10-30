@@ -8,7 +8,14 @@ from typing import Any, Callable, Dict, List
 def _load_module(module_name: str):
     if importlib.util.find_spec(module_name) is None:
         raise ModuleNotFoundError(module_name)
-    return importlib.import_module(module_name)
+    try:
+        return importlib.import_module(module_name)
+    except AttributeError as exc:
+        if module_name == "torchaudio" and "partially initialized" in str(exc):
+            raise ImportError(
+                "torchaudio ne s'est pas initialisé correctement (extension CUDA manquante)."
+            ) from exc
+        raise
 
 
 def _normalise_cuda_value(raw: Any) -> str | None:
