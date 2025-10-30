@@ -49,7 +49,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
                     "torchaudio n'est pas installé. Installez une distribution compatible "
-                    "CUDA (ex. pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cu128)"
+                    "CUDA (ex. pip install 'torchaudio==2.8.0+cu126' --index-url https://download.pytorch.org/whl/cu126)."
                 ) from exc
             except Exception as exc:  # pragma: no cover - dépend de la binaire installée
                 raise RuntimeError(
