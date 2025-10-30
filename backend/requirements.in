@@ -18,9 +18,9 @@ aiofiles>=23
 redis>=5.0
 
 # GPU/AI stack (CUDA 12.6 compatible wheels)
-torch==2.8.0
-torchvision==0.23.0
-torchaudio==2.8.0
+torch==2.8.0+cu126
+torchvision==0.23.0+cu126
+torchaudio==2.8.0+cu126
 
 # NVIDIA NeMo toolkit for Canary ASR support
 nemo_toolkit[asr]==2.1.0
