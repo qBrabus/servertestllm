@@ -1,7 +1,7 @@
 # Primary dependency declarations for the backend.
 # Run `uv pip compile backend/requirements.in --python-version 3.12 --resolution=highest --output-file backend/requirements.txt` to refresh pins.
 
---index-url https://download.pytorch.org/whl/cu126
+--index-url https://download.pytorch.org/whl/cu124
 --extra-index-url https://pypi.org/simple
 
 # Core FastAPI stack
@@ -17,10 +17,10 @@ orjson>=3.9
 aiofiles>=23
 redis>=5.0
 
-# GPU/AI stack (CUDA 12.6 compatible wheels)
-torch==2.8.0+cu126
-torchvision==0.23.0+cu126
-torchaudio==2.8.0+cu126
+# GPU/AI stack (CUDA 12.4 compatible wheels)
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0+cu124
 
 # NVIDIA NeMo toolkit for Canary ASR support
 nemo_toolkit[asr]==2.1.0
