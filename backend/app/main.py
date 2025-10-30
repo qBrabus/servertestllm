@@ -14,6 +14,7 @@ from .routers import admin, audio, diarization, openai
 from .services.gpu_monitor import gpu_monitor
 from .services.model_registry import registry
 from .services.token_store import token_store
+from .utils import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,13 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def on_startup() -> None:
-        logging.basicConfig(level=settings.log_level.upper())
+        configure_logging(
+            level=settings.log_level,
+            log_dir=settings.log_dir,
+            file_name=settings.log_file_name,
+            max_bytes=settings.log_max_bytes,
+            backup_count=settings.log_backup_count,
+        )
         token_store.configure(settings.model_cache_dir)
         initial_token = settings.huggingface_token or token_store.load()
         if settings.huggingface_token and not token_store.has_token():
