@@ -40,10 +40,31 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
     async def load(self) -> None:
         def _load():
+            import importlib
+
             import torch
-            from pyannote.audio import Pipeline
-            import pyannote.audio as pyannote_audio
-            from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
+
+            try:
+                importlib.import_module("torchaudio")
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "torchaudio n'est pas installé. Installez une distribution compatible "
+                    "CUDA (ex. pip install torchaudio --extra-index-url https://download.pytorch.org/whl/cu128)"
+                ) from exc
+            except Exception as exc:  # pragma: no cover - dépend de la binaire installée
+                raise RuntimeError(
+                    "Échec de l'initialisation de torchaudio. Vérifiez que la version correspond à "
+                    "votre runtime CUDA et réinstallez le paquet."
+                ) from exc
+
+            try:
+                from pyannote.audio import Pipeline
+                import pyannote.audio as pyannote_audio
+                from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "pyannote.audio >= 4.0 doit être installé pour activer la diarisation."
+                ) from exc
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
                 raise RuntimeError("CUDA est requis pour charger le pipeline Pyannote")
@@ -236,7 +257,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             import numpy as np
             import soundfile as sf
             import torch
-            import torchaudio.functional as F
+
+            from app.utils.audio import ensure_mono, resample_waveform
 
             if self.pipeline is None:
                 raise RuntimeError("Le pipeline Pyannote n'est pas initialisé")
@@ -246,13 +268,10 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 return {"segments": []}
 
             audio_array, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
-            if audio_array.ndim > 1:
-                audio_array = audio_array.mean(axis=1)
             waveform = torch.from_numpy(audio_array)
-            if waveform.ndim == 1:
-                waveform = waveform.unsqueeze(0)
+            waveform = ensure_mono(waveform)
             if sr != target_sr:
-                waveform = F.resample(waveform, sr, target_sr)
+                waveform = resample_waveform(waveform, sr, target_sr)
             waveform = waveform.squeeze(0).contiguous()
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

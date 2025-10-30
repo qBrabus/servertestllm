@@ -702,6 +702,8 @@ torch-audiomentations==0.12.0
 torch-pitch-shift==1.2.5
     # via torch-audiomentations
 torchaudio==2.8.0
+    # via -r requirements.in
+nemo_toolkit[asr]==1.23.0
     # via
     #   -r backend/requirements.in
     #   pyannote-audio
