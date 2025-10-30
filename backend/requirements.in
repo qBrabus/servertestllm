@@ -23,7 +23,7 @@ torchvision==0.23.0
 torchaudio==2.8.0
 
 # NVIDIA NeMo toolkit for Canary ASR support
-nemo_toolkit[asr]==1.23.0
+nemo_toolkit[asr]==2.1.0
 accelerate>=1.1
 transformers>=4.57
 huggingface-hub>=0.26
@@ -31,7 +31,8 @@ vllm==0.11.0
 pyannote.audio==4.0.1
 
 # Lightning ecosystem
-lightning>=2.4
+lightning==2.4.0
+pytorch-lightning==2.4.0
 torchmetrics>=1.4
 pytorch-metric-learning>=2.4
 lightning-utilities>=0.10
