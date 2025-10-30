@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .compat import apply_runtime_fixes
 from .config import settings
 from .routers import admin, audio, diarization, openai
 from .services.gpu_monitor import gpu_monitor
@@ -15,6 +16,9 @@ from .services.model_registry import registry
 from .services.token_store import token_store
 
 logger = logging.getLogger(__name__)
+
+
+apply_runtime_fixes()
 
 
 def create_app() -> FastAPI:
