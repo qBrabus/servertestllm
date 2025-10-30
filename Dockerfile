@@ -63,17 +63,6 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip setuptools wheel meson-python meson && \
-    python3 -m pip install --no-cache-dir \
-        numpy==1.26.4 \
-        Cython==0.29.37 \
-        typing_extensions==4.15.0 && \
-    python3 -m pip install --no-cache-dir \
-        pybind11==2.13.5 && \
-    python3 -m pip install --no-cache-dir \
-        torch==2.8.0 \
-        torchvision==0.23.0 \
-        torchaudio==2.8.0 \
-        --index-url https://download.pytorch.org/whl/cu126 && \
     python3 -m pip install --no-build-isolation --no-cache-dir -r /app/requirements.txt
 
 COPY backend /app/backend

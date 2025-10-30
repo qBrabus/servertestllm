@@ -1,0 +1,72 @@
+# Primary dependency declarations for the backend.
+# Run `uv pip compile backend/requirements.in --python-version 3.12 --resolution=highest --output-file backend/requirements.txt` to refresh pins.
+
+--index-url https://download.pytorch.org/whl/cu126
+--extra-index-url https://pypi.org/simple
+
+# Core FastAPI stack
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.9
+pydantic-settings>=2.5
+typing_extensions>=4.12
+httpx>=0.28
+python-multipart>=0.0.9
+uvloop>=0.19
+orjson>=3.9
+aiofiles>=23
+redis>=5.0
+
+# GPU/AI stack (CUDA 12.6 compatible wheels)
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+accelerate>=1.1
+transformers>=4.57
+huggingface-hub>=0.26
+vllm==0.11.0
+pyannote.audio==4.0.1
+
+# Lightning ecosystem
+lightning>=2.4
+torchmetrics>=1.4
+pytorch-metric-learning>=2.4
+lightning-utilities>=0.10
+
+# Audio / signal processing
+torch-audiomentations>=0.12
+torchcodec>=0.8
+librosa>=0.10
+soundfile>=0.12
+onnx>=1.16
+cmake>=3.28
+
+# Numeric stack
+Cython>=3.0
+numpy>=2.1
+pybind11>=2.13
+h5py>=3.11
+scipy>=1.11
+pandas>=2.2
+scikit-learn==1.7.2
+lhotse>=1.28
+lilcom>=1.7
+
+# Misc utilities
+pooch>=1.8
+msgpack>=1.0
+platformdirs>=4.0
+propcache>=0.4
+gputil>=1.4
+psutil>=5.9
+openai>=1.57
+openai-harmony==0.0.4
+jiter>=0.11
+opentelemetry-api>=1.38
+opentelemetry-exporter-otlp>=1.38
+prometheus-client>=0.20
+jsonschema>=4.23
+jsonschema-specifications>=2023
+MarkupSafe>=3.0
+tqdm>=4.66
+packaging>=24
