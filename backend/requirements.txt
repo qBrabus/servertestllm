@@ -871,7 +871,7 @@ starlette==0.49.1
     # via
     #   fastapi
     #   prometheus-fastapi-instrumentator
-sympy==1.14.0
+sympy==1.13.1
     # via torch
 tabulate==0.9.0
     # via lhotse

@@ -66,6 +66,7 @@ pandas>=2.2
 scikit-learn==1.7.2
 lhotse>=1.28
 lilcom>=1.7
+sympy==1.13.1
 
 # Misc utilities
 pooch>=1.8
