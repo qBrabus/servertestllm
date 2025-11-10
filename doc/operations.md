@@ -60,7 +60,9 @@ Les scripts `build_docker.sh` et `run_docker.sh` acceptent en plus :
 
 ## Journalisation & supervision
 
-- Logs FastAPI disponibles sur stdout (configurés via `LOG_LEVEL`).
+- Les logs applicatifs sont diffusés sur stdout **et** dans un fichier rotatif `LOG_DIR/LOG_FILE_NAME` (par défaut `/var/log/servertestllm/backend.log`).
+- `ModelRegistry` trace désormais l'instanciation des wrappers, les changements de préférences GPU, les téléchargements forcés ainsi que l'arrêt propre lors du shutdown.
+- `GPUMonitor` journalise les indisponibilités CUDA/GPUtil afin d'identifier rapidement un conteneur lancé sans GPU ou avec une installation incomplète.
 - `ModelWrapper.update_runtime()` enregistre les actions importantes (téléchargement, chargement, erreurs) pour le tableau de bord.
 - `dependency_inspector` informe des incompatibilités CUDA (ex. torchaudio CPU-only).
 

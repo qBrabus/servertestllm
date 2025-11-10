@@ -99,7 +99,7 @@ Tous héritent de `BaseModelWrapper` qui gère :
 
 1. **Ajouter un nouveau modèle** :
    - créer un wrapper héritant de `BaseModelWrapper`,
-   - étendre `_register_defaults()` dans `ModelRegistry` (ou prévoir une configuration dynamique),
+   - l'enregistrer via `ModelRegistry.register()` (éventuellement après un `configure(..., with_defaults=False)` pour composer une configuration personnalisée),
    - mettre à jour le frontend si nécessaire (nouvelle carte, actions).
 2. **Nouvelles routes** : centraliser les schémas Pydantic dans `schemas/`, réutiliser `ModelRegistry` pour la gestion du cycle de vie.
 3. **Instrumentation** : utiliser `update_runtime()` pour informer le tableau de bord (progression, erreurs) et fournir un `server` avec métadonnées utiles.
@@ -107,8 +107,8 @@ Tous héritent de `BaseModelWrapper` qui gère :
 
 ## Dépendances critiques
 
-- **PyTorch 2.8.0 + CUDA 12.6** : défini via `--index-url` dans `backend/requirements.txt`.
-- **vLLM 0.11.0**, **NeMo 1.23.0**, **pyannote.audio 4.0.1**.
+- **PyTorch 2.6.0 + CUDA 12.4** : défini via `--index-url` dans `backend/requirements.txt`.
+- **vLLM 0.11.0**, **NeMo 2.1.0**, **pyannote.audio 4.0.1**.
 - `gputil`, `psutil` pour la supervision.
 - Les épingles strictes (`numpy`, `scipy`, `pandas`, etc.) évitent les re-résolutions pip coûteuses.
 

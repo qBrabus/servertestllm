@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -8,6 +9,9 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from ..models.base import BaseModelWrapper, ModelMetadata
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +35,8 @@ class ModelSlot:
 
 
 class ModelRegistry:
+    """Central registry coordinating model lifecycle management."""
+
     def __init__(self) -> None:
         self._slots: Dict[str, ModelSlot] = {}
         self._task_index: Dict[str, str] = {}
@@ -38,12 +44,51 @@ class ModelRegistry:
         self._cache_dir = Path("/models")
         self._hf_token: Optional[str] = None
 
-    def configure(self, hf_token: Optional[str], cache_dir: Path) -> None:
+    def configure(
+        self,
+        hf_token: Optional[str],
+        cache_dir: Path,
+        *,
+        with_defaults: bool = True,
+    ) -> None:
+        """Initialise the registry with cache information and default models."""
+
         self._hf_token = hf_token
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        LOGGER.info(
+            "Configuring model registry (cache_dir=%s, token_provided=%s)",
+            self._cache_dir,
+            bool(hf_token),
+        )
         self._apply_token_to_environment()
-        self._register_defaults()
+        self._slots.clear()
+        self._task_index.clear()
+        if with_defaults:
+            self._register_defaults()
+
+    def register(
+        self,
+        key: str,
+        *,
+        metadata: ModelMetadata,
+        factory: Callable[[], BaseModelWrapper],
+        override: bool = False,
+    ) -> None:
+        """Register a new model factory in the registry."""
+
+        if key in self._slots and not override:
+            raise ValueError(f"Model key '{key}' already registered")
+
+        if key in self._slots:
+            previous_task = self._slots[key].metadata.task
+            self._task_index.pop(previous_task, None)
+
+        self._slots[key] = ModelSlot(metadata=metadata, factory=factory)
+        self._task_index[metadata.task] = key
+        LOGGER.debug(
+            "Registered model '%s' for task '%s'", key, metadata.task
+        )
 
     def _register_defaults(self) -> None:
         def _qwen_factory() -> BaseModelWrapper:
@@ -73,36 +118,39 @@ class ModelRegistry:
                 preferred_device_ids=[0],
             )
 
-        self._slots = {
-            "qwen": ModelSlot(
-                metadata=ModelMetadata(
-                    identifier="Qwen/Qwen3-VL-30B-A3B-Instruct",
-                    task="chat-completion",
-                    description="Qwen3 VL 30B A3B Instruct model for multimodal chat completions",
-                    format="chatml",
-                ),
-                factory=_qwen_factory,
+        self.register(
+            "qwen",
+            metadata=ModelMetadata(
+                identifier="Qwen/Qwen3-VL-30B-A3B-Instruct",
+                task="chat-completion",
+                description="Qwen3 VL 30B A3B Instruct model for multimodal chat completions",
+                format="chatml",
             ),
-            "canary": ModelSlot(
-                metadata=ModelMetadata(
-                    identifier="nvidia/canary-1b-v2",
-                    task="speech-to-text",
-                    description="NVIDIA Canary multilingual ASR model",
-                    format="wav/ogg/flac",
-                ),
-                factory=_canary_factory,
+            factory=_qwen_factory,
+            override=True,
+        )
+        self.register(
+            "canary",
+            metadata=ModelMetadata(
+                identifier="nvidia/canary-1b-v2",
+                task="speech-to-text",
+                description="NVIDIA Canary multilingual ASR model",
+                format="wav/ogg/flac",
             ),
-            "pyannote": ModelSlot(
-                metadata=ModelMetadata(
-                    identifier="pyannote/speaker-diarization-community-1",
-                    task="speaker-diarization",
-                    description="Pyannote diarization community pipeline",
-                    format="wav/ogg/flac",
-                ),
-                factory=_pyannote_factory,
+            factory=_canary_factory,
+            override=True,
+        )
+        self.register(
+            "pyannote",
+            metadata=ModelMetadata(
+                identifier="pyannote/speaker-diarization-community-1",
+                task="speaker-diarization",
+                description="Pyannote diarization community pipeline",
+                format="wav/ogg/flac",
             ),
-        }
-        self._task_index = {slot.metadata.task: key for key, slot in self._slots.items()}
+            factory=_pyannote_factory,
+            override=True,
+        )
 
     def keys(self) -> List[str]:
         return list(self._slots.keys())
@@ -117,22 +165,31 @@ class ModelRegistry:
             for slot in self._slots.values():
                 if slot.instance is not None:
                     slot.instance.set_hf_token(token)
+        LOGGER.info("Hugging Face token updated (present=%s)", bool(token))
 
     def _apply_token_to_environment(self) -> None:
         if self._hf_token:
             os.environ["HUGGINGFACE_TOKEN"] = self._hf_token
             os.environ["HUGGING_FACE_HUB_TOKEN"] = self._hf_token
+            LOGGER.debug("Applied Hugging Face token to environment")
         else:
             os.environ.pop("HUGGINGFACE_TOKEN", None)
             os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
+            LOGGER.debug("Cleared Hugging Face token from environment")
 
     async def get(self, key: str) -> BaseModelWrapper:
         async with self._lock:
             slot = self._slots.get(key)
             if slot is None:
+                LOGGER.error("Attempted to access unknown model '%s'", key)
                 raise KeyError(f"Unknown model key: {key}")
             if slot.instance is None:
-                slot.instance = slot.factory()
+                LOGGER.info("Instantiating model '%s'", key)
+                try:
+                    slot.instance = slot.factory()
+                except Exception:
+                    LOGGER.exception("Failed to instantiate model '%s'", key)
+                    raise
             return slot.instance
 
     async def get_by_task(self, task: str) -> BaseModelWrapper:
@@ -146,20 +203,27 @@ class ModelRegistry:
         if device_ids is not None:
             preferences_changed = model.update_device_preferences(device_ids)
             if preferences_changed and model.is_loaded:
+                LOGGER.info(
+                    "Device preference change detected for '%s', reloading", key
+                )
                 await model.unload()
+        LOGGER.info("Ensuring model '%s' is loaded", key)
         await model.ensure_loaded()
 
     async def ensure_downloaded(self, key: str) -> None:
         model = await self.get(key)
+        LOGGER.info("Ensuring model '%s' artifacts are downloaded", key)
         await model.ensure_downloaded()
 
     async def unload(self, key: str) -> None:
         async with self._lock:
             slot = self._slots.get(key)
             if slot is None:
+                LOGGER.error("Attempted to unload unknown model '%s'", key)
                 raise KeyError(f"Unknown model key: {key}")
             model = slot.instance
         if model:
+            LOGGER.info("Unloading model '%s'", key)
             await model.unload()
 
     async def status(self) -> Dict[str, ModelStatus]:
@@ -199,10 +263,12 @@ class ModelRegistry:
 
     async def shutdown(self) -> None:
         async with self._lock:
-            for slot in self._slots.values():
-                model = slot.instance
-                if model and model.is_loaded:
-                    await model.unload()
+            slots = list(self._slots.items())
+        for key, slot in slots:
+            model = slot.instance
+            if model and model.is_loaded:
+                LOGGER.info("Shutting down model '%s'", key)
+                await model.unload()
 
 
 registry = ModelRegistry()
