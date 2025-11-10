@@ -1051,6 +1051,8 @@ watchfiles==1.1.1
     # via
     #   uvicorn
     #   vllm
+wheel-stub==0.4.2
+    # via nvidia-cusparselt-cu12
 wcwidth==0.2.14
     # via prompt-toolkit
 webdataset==1.0.2
