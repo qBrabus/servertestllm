@@ -1,7 +1,7 @@
 # Primary dependency declarations for the backend.
 # Run `uv pip compile backend/requirements.in --python-version 3.12 --resolution=highest --output-file backend/requirements.txt` to refresh pins.
 
---index-url https://download.pytorch.org/whl/cu124
+--index-url https://download.pytorch.org/whl/cu128
 --extra-index-url https://pypi.org/simple
 
 # Core FastAPI stack
@@ -17,12 +17,14 @@ orjson>=3.9
 aiofiles>=23
 redis>=5.0
 
-# GPU/AI stack (CUDA 12.4 compatible wheels)
-torch==2.8.0
-torchvision==0.23.0
-torchaudio==2.8.0
+# GPU/AI stack (CUDA 12.8 compatible wheels).  Explicitly request the CUDA
+# builds to avoid accidentally pulling CPU-only wheels when the resolver falls
+# back to PyPI.
+torch==2.8.0+cu128
+torchvision==0.23.0+cu128
+torchaudio==2.8.0+cu128
 # Explicitly pin CUDA solver/runtime components required by the
-# torch 2.8.0 wheels (CUDA 12.4 build).  The default uv resolver occasionally
+# torch 2.8.0 wheels (CUDA 12.8 build).  The default uv resolver occasionally
 # floats these higher than what torch expects, which breaks Docker
 # builds with ResolutionImpossible errors.
 nvidia-cusolver-cu12==11.7.3.90
