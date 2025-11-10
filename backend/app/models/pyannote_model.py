@@ -7,8 +7,9 @@ import io
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
 
 from .base import BaseModelWrapper, ModelMetadata
 
@@ -22,6 +23,16 @@ if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
 
 class PyannoteDiarizationModel(BaseModelWrapper):
     model_id = "pyannote/speaker-diarization-community-1"
+
+    _MIN_GPU_MEMORY_BYTES = 5 * 1024 ** 3  # ~5 Go de mémoire libre requise
+
+    @dataclass
+    class _DevicePlan:
+        use_gpu: bool
+        device: Any
+        dtype: Any | None
+        free_memory: int | None = None
+        total_memory: int | None = None
 
     def __init__(
         self,
@@ -198,25 +209,154 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 if original_speaker_get_model is not None:
                     speaker_diarization_module.get_model = original_speaker_get_model  # type: ignore[assignment]
 
-            target_gpu = self.primary_device() or 0
-            torch.cuda.set_device(target_gpu)
+            plan = self._select_device_plan(torch)
+            if not plan.use_gpu:
+                LOGGER.warning(
+                    "Mémoire GPU insuffisante (%s). Pyannote fonctionnera sur CPU.",
+                    self._format_memory(plan.free_memory, plan.total_memory),
+                )
+            if plan.use_gpu:
+                torch.cuda.set_device(plan.device.index)  # type: ignore[arg-type]
             try:
-                self.pipeline.to(torch.device("cuda", target_gpu))
-            except Exception as exc:  # pragma: no cover - remontée explicite
-                raise RuntimeError(
-                    f"Impossible de déplacer Pyannote sur le GPU {target_gpu}: {exc}"
-                ) from exc
+                plan = self._move_pipeline_to_device(self.pipeline, plan, torch)
+            except Exception as exc:  # pragma: no cover - dépend fortement du matériel
+                if plan.use_gpu:
+                    LOGGER.warning(
+                        "Échec du transfert Pyannote sur %s (%s). Bascule sur CPU.",
+                        plan.device,
+                        exc,
+                    )
+                    torch.cuda.empty_cache()
+                plan = self._DevicePlan(
+                    use_gpu=False,
+                    device=torch.device("cpu"),
+                    dtype=None,
+                )
+                plan = self._move_pipeline_to_device(self.pipeline, plan, torch)
+
             self.update_runtime(
                 status="Pipeline Pyannote prêt",
                 progress=98,
                 server=self.build_server_metadata(
                     endpoint="/api/diarization/process",
                     type="Pyannote",
-                    device=f"cuda:{target_gpu}",
+                    device=str(plan.device),
                 ),
             )
 
         await asyncio.to_thread(_load)
+
+    def _select_device_plan(self, torch_module: Any) -> _DevicePlan:
+        preferred = self.primary_device()
+        device_index = preferred if preferred is not None else 0
+        available = max(1, torch_module.cuda.device_count())
+        if device_index >= available:
+            device_index = 0
+
+        free_bytes: int | None = None
+        total_bytes: int | None = None
+        try:
+            free_bytes, total_bytes = torch_module.cuda.mem_get_info(device_index)
+        except Exception:  # pragma: no cover - dépend du runtime CUDA
+            free_bytes = total_bytes = None
+
+        device = torch_module.device("cuda", device_index)
+        has_enough_memory = (
+            free_bytes is None or free_bytes >= self._MIN_GPU_MEMORY_BYTES
+        )
+
+        dtype = None
+        if has_enough_memory:
+            try:
+                capability: Tuple[int, int] = torch_module.cuda.get_device_capability(device_index)
+            except Exception:  # pragma: no cover
+                capability = (0, 0)
+            major, _ = capability
+            if major >= 8:
+                dtype = torch_module.bfloat16
+            elif major >= 7:
+                dtype = torch_module.float16
+
+        if not has_enough_memory:
+            device = torch_module.device("cpu")
+
+        return self._DevicePlan(
+            use_gpu=has_enough_memory,
+            device=device,
+            dtype=dtype,
+            free_memory=free_bytes,
+            total_memory=total_bytes,
+        )
+
+    def _move_pipeline_to_device(
+        self,
+        pipeline: "Pipeline",
+        plan: _DevicePlan,
+        torch_module: Any,
+    ) -> _DevicePlan:
+        target_device = plan.device
+        move_kwargs = {"device": target_device}
+        if plan.dtype is not None:
+            move_kwargs["dtype"] = plan.dtype
+
+        errors: List[str] = []
+        for name, module in self._iter_pipeline_modules(pipeline):
+            if not hasattr(module, "to"):
+                continue
+            try:
+                module.to(**move_kwargs)
+            except TypeError:
+                # Certaines briques n'acceptent pas ``dtype``
+                module.to(device=target_device)
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
+        if hasattr(pipeline, "to"):
+            try:
+                pipeline.to(**move_kwargs)
+            except TypeError:
+                pipeline.to(device=target_device)
+
+        if not plan.use_gpu:
+            return self._DevicePlan(
+                use_gpu=False,
+                device=torch_module.device("cpu"),
+                dtype=None,
+                free_memory=plan.free_memory,
+                total_memory=plan.total_memory,
+            )
+
+        return plan
+
+    def _iter_pipeline_modules(self, pipeline: "Pipeline") -> Iterable[Tuple[str, Any]]:
+        segmentation = getattr(pipeline, "_segmentation", None)
+        segmentation_model = getattr(segmentation, "model", None)
+        if segmentation_model is not None:
+            yield "segmentation", segmentation_model
+
+        embedding_wrapper = getattr(pipeline, "_embedding", None)
+        embedding_model = getattr(embedding_wrapper, "model", None)
+        if embedding_model is None:
+            embedding_model = getattr(embedding_wrapper, "_model", None)
+        if embedding_model is not None:
+            yield "embedding", embedding_model
+
+        plda = getattr(pipeline, "_plda", None)
+        if plda is not None and hasattr(plda, "to"):
+            yield "plda", plda
+
+    @staticmethod
+    def _format_memory(free_bytes: int | None, total_bytes: int | None) -> str:
+        if free_bytes is None or total_bytes is None:
+            return "inconnue"
+
+        def _to_gib(value: int) -> float:
+            return value / float(1024**3)
+
+        return f"{_to_gib(free_bytes):.1f} GiB libres / {_to_gib(total_bytes):.1f} GiB"
 
     def _download_repo(self, auth_token: str | None) -> Path:
         return self.download_snapshot(

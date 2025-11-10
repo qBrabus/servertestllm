@@ -70,35 +70,90 @@ def _probe_torchvision() -> Dict[str, Any]:
     }
 
 
+def _format_cuda_version(raw: Any) -> str | None:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    major = value // 1000
+    minor = (value % 1000) // 10
+    patch = value % 10
+    if patch:
+        return f"{major}.{minor}.{patch}"
+    return f"{major}.{minor}"
+
+
 def _probe_torchaudio() -> Dict[str, Any]:
+    import re
+
     torchaudio = _load_module("torchaudio")
     version = getattr(torchaudio, "__version__", "unknown")
     version_meta = getattr(torchaudio, "version", None)
     cuda_runtime = _normalise_cuda_value(getattr(version_meta, "cuda", None)) if version_meta else None
-    cuda_build = bool(cuda_runtime and cuda_runtime.lower() != "none")
-    cuda_available = False
-    if cuda_build:
+    if not cuda_runtime and version_meta is not None:
+        cuda_runtime = _normalise_cuda_value(getattr(version_meta, "cuda_version", None))
+    cuda_build = bool(cuda_runtime and str(cuda_runtime).lower() != "none")
+    cuda_extension_available = False
+
+    # Recent torchaudio releases expose CUDA metadata via ``torchaudio.lib._torchaudio``.
+    try:  # pragma: no cover - depends on optional binary extension
+        from torchaudio.lib import _torchaudio as _ta  # type: ignore
+
+        raw_version = getattr(_ta, "cuda_version", None)
+        if callable(raw_version):
+            raw_version = raw_version()
+        formatted = _format_cuda_version(raw_version)
+        if formatted:
+            cuda_runtime = cuda_runtime or formatted
+            cuda_build = True
+            cuda_extension_available = True
+    except Exception:
+        cuda_extension_available = False
+
+    # Older wheels (<2.5) exposed ``torchaudio._extension.utils``
+    if not cuda_extension_available:  # pragma: no cover - depends on binary distribution
         try:
-            # torchaudio 2.5 exposes this helper which verifies the CUDA extension is loaded
             from torchaudio._extension import utils as ta_utils  # type: ignore
 
-            cuda_available = bool(getattr(ta_utils, "is_cuda_available", lambda: False)())
-        except Exception:  # pragma: no cover - depends on binary distribution
-            cuda_available = False
+            cuda_extension_available = bool(
+                getattr(ta_utils, "is_cuda_available", lambda: False)()
+            )
+        except Exception:
+            cuda_extension_available = False
+
+    if not cuda_runtime:
+        match = re.search(r"\+cu(\d+)", version)
+        if match:
+            digits = match.group(1)
+            if len(digits) >= 2:
+                major = digits[:-1]
+                minor = digits[-1]
+            else:
+                major, minor = digits, "0"
+            try:
+                cuda_runtime = f"{int(major)}.{int(minor)}"
+            except ValueError:
+                cuda_runtime = None
+        if cuda_runtime:
+            cuda_build = True
+
     torch_cuda = False
     try:
         torch = _load_module("torch")
         torch_cuda = torch.cuda.is_available()
     except Exception:
         torch_cuda = False
+
     return {
         "name": "torchaudio",
         "version": version,
-        "cuda": cuda_build and (cuda_available or torch_cuda),
+        "cuda": bool(cuda_build and (cuda_extension_available or torch_cuda)),
         "details": {
             "cuda_runtime": cuda_runtime,
-            "cuda_build": cuda_build,
-            "cuda_extension_available": cuda_available,
+            "cuda_build": bool(cuda_build),
+            "cuda_extension_available": bool(cuda_extension_available),
         },
     }
 
