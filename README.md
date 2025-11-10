@@ -19,7 +19,8 @@ L'API FastAPI expose des endpoints compatibles OpenAI ainsi que des routes audio
 7. [Utilisation des APIs](#utilisation-des-apis)
 8. [Supervision & tableau de bord](#supervision--tableau-de-bord)
 9. [Tests et vérifications](#tests-et-vérifications)
-10. [Documentation additionnelle](#documentation-additionnelle)
+10. [Mise à jour des dépendances](#mise-à-jour-des-dépendances)
+11. [Documentation additionnelle](#documentation-additionnelle)
 
 ## Architecture
 
@@ -158,6 +159,7 @@ Les clés valides pour `{clé}` sont `qwen`, `canary`, `pyannote`. Le détail de
 - Panneau latéral : GPU (nom, VRAM utilisée/total, température), métriques système (CPU/RAM), dépendances CUDA (torch, torchvision, torchaudio).
 - Les endpoints exposés sont listés avec l'URL complète, les raccourcis (copier) et la documentation OpenAPI (`/docs`).
 - `useDashboard` adapte l'intervalle de rafraîchissement : 1 s pendant les chargements, 5 s au repos.
+- Un fichier de log rotatif est produit dans `LOG_DIR` (défaut : `/var/log/servertestllm/backend.log`) en plus de la sortie standard. Les messages du `ModelRegistry` et du `GPUMonitor` y consignent les actions (instanciation, téléchargement, indisponibilité GPU).
 
 Pour une description complète des composants React et des flux de données, se référer à [`doc/frontend.md`](doc/frontend.md).
 
@@ -173,9 +175,23 @@ Pour une description complète des composants React et des flux de données, se 
   npm run lint
   npm run typecheck
   ```
+- **Tests unitaires backend** :
+  ```bash
+  python -m unittest backend.tests.test_model_registry
+  ```
 - **Contrôle des dépendances GPU** : appeler `GET /api/admin/status` et vérifier la section `dependencies` (doit indiquer `cuda: true`).
 
 L'exécution d'inférences effectives nécessite un GPU CUDA disponible. En CI CPU-only, se limiter à la compilation et aux linters.
+
+## Mise à jour des dépendances
+
+Pour rafraîchir les épingles Python et valider la compatibilité CUDA, utiliser [uv](https://github.com/astral-sh/uv) :
+
+```bash
+uv pip compile backend/requirements.in --python-version 3.12 --resolution=highest --output-file backend/requirements.txt
+```
+
+Cette commande régénère `backend/requirements.txt` en respectant l'index PyTorch CUDA 12.4. Elle évite les conflits de type `nvidia-curand`/`torch` rencontrés lors des installations Docker.
 
 ## Documentation additionnelle
 
