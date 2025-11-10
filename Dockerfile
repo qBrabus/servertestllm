@@ -63,7 +63,7 @@ WORKDIR /app
 
 COPY backend/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip setuptools wheel meson-python meson && \
-    python3 -m pip install --no-build-isolation --no-cache-dir -r /app/requirements.txt
+    python3 -m pip install --no-cache-dir -r /app/requirements.txt
 
 COPY backend /app/backend
 COPY --from=frontend-builder /frontend/dist /app/frontend
