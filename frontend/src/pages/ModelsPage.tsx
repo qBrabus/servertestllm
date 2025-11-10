@@ -205,7 +205,7 @@ const ModelsPage = () => {
               Pilotage visuel des pipelines IA & audio
             </Typography>
             <Typography variant="subtitle1" sx={{ mt: 1.5, maxWidth: 640, opacity: 0.9 }}>
-              Surveillez la disponibilité, la mise en cache et les points d'accès API de vos modèles GPU.
+              Surveillez la disponibilité, la mise en cache et les points d’accès API de vos modèles GPU.
               Chaque carte propose désormais une télémétrie en direct, des actions rapides et la copie immédiate des
               endpoints exposés.
             </Typography>
