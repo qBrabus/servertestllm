@@ -385,7 +385,7 @@ const ModelCard = ({
             unmountOnExit
           >
             <Stack spacing={1.25}>
-              <Typography variant="subtitle2">Points d'accès exposés</Typography>
+              <Typography variant="subtitle2">Points d’accès exposés</Typography>
               {serverHighlights.map(({ key, label, value, icon }) => (
                 <Stack
                   key={key}
@@ -506,7 +506,6 @@ const ModelCard = ({
             backgroundColor: alpha(theme.palette.background.paper, 0.75),
             borderRadius: 2
           }}
-          MenuProps={{ disableCloseOnSelect: true }}
         >
           {gpuOptions.map((gpu) => (
             <MenuItem key={gpu.id} value={String(gpu.id)}>

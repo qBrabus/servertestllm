@@ -104,6 +104,9 @@ export interface DashboardState {
   dependencies: DependencyStatus[];
 }
 
+export type ModelInfo = ModelStatus;
+export type GPUInfo = GPUStatus;
+
 export interface HuggingFaceTokenStatus {
   has_token: boolean;
 }

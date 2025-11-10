@@ -37,7 +37,7 @@ const TorchStackCard = ({ dependencies }: TorchStackCardProps) => {
         </Typography>
         {dependencies.length === 0 ? (
           <Typography color="text.secondary">
-            Aucun module PyTorch n'a été détecté sur le serveur.
+            Aucun module PyTorch n’a été détecté sur le serveur.
           </Typography>
         ) : (
           <List disablePadding>
@@ -83,7 +83,7 @@ const TorchStackCard = ({ dependencies }: TorchStackCardProps) => {
                           )}
                           {!dependency.error && !isCuda && dependency.cuda === false && (
                             <Typography color="warning.main" variant="body2">
-                              Le module est installé mais ne détecte pas d'exécution CUDA.
+                              Le module est installé mais ne détecte pas d’exécution CUDA.
                             </Typography>
                           )}
                           {hasDetails && (

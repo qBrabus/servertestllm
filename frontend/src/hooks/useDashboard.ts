@@ -6,14 +6,15 @@ export const useDashboard = () => {
   return useQuery<DashboardState>({
     queryKey: ["dashboard"],
     queryFn: fetchDashboard,
-    refetchInterval: (data) => {
-      if (!data) {
+    refetchInterval: (query) => {
+      const current = query.state.data;
+      if (!current) {
         return 5000;
       }
 
-      const models = data.models ?? {};
-      const hasActiveWork = Object.values(models).some((model) => {
-        return model.runtime?.state === "loading";
+      const models = current.models ?? {};
+      const hasActiveWork = Object.values(models).some((entry) => {
+        return (entry.runtime?.state ?? "idle") === "loading";
       });
 
       return hasActiveWork ? 1000 : 5000;
