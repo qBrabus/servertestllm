@@ -205,18 +205,19 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 return value
 
             def _inject_execution_preferences(value: Any) -> Any:
-                plan = plan_holder["plan"]
-                if plan.use_gpu:
-                    return value
-
-                cpu_device = "cpu"
+                # Charger systématiquement les poids sur le CPU pour éviter les
+                # allocations GPU précoces susceptibles de provoquer des
+                # ``std::bad_alloc`` non interceptables. Les modules seront
+                # ensuite déplacés vers l'appareil cible via
+                # ``_move_pipeline_to_device``.
+                map_location = "cpu"
 
                 if isinstance(value, str):
-                    return {"checkpoint": value, "map_location": cpu_device}
+                    return {"checkpoint": value, "map_location": map_location}
 
                 if isinstance(value, dict):
                     updated = dict(value)
-                    updated.setdefault("map_location", cpu_device)
+                    updated["map_location"] = map_location
                     return updated
 
                 return value
