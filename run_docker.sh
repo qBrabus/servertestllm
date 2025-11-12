@@ -12,20 +12,52 @@ ADVERTISED_HOSTS=${ADVERTISED_HOSTS:-}
 MODEL_CACHE_DIR=${MODEL_CACHE_DIR:-$(pwd)/model_cache}
 HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-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}
 OPENAI_KEYS=${OPENAI_KEYS:-}
+LOG_BASE_DIR=${LOG_DIR:-$(pwd)/logs}
+CONTAINER_LOG_FILE=${CONTAINER_LOG_FILE:-${LOG_BASE_DIR}/container.log}
+RUN_LOG_FILE=${RUN_LOG_FILE:-${LOG_BASE_DIR}/docker_run.log}
+FOLLOW_CONTAINER_LOGS=${FOLLOW_CONTAINER_LOGS:-true}
 
 mkdir -p "${MODEL_CACHE_DIR}"
+mkdir -p "${LOG_BASE_DIR}"
+
+exec > >(stdbuf -oL tee -a "${RUN_LOG_FILE}") 2>&1
+
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+log() {
+  local level=$1
+  shift
+  printf '%s %s %s\n' "$(timestamp)" "${level}" "$*"
+}
+
+log_info() {
+  log "[INFO]" "$@"
+}
+
+log_warn() {
+  log "[WARN]" "$@"
+}
+
+log_error() {
+  log "[ERROR]" "$@"
+}
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required to run the container." >&2
+  log_error "Docker is required to run the container."
   exit 1
 fi
 
 if docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}$"; then
-  echo "Stopping existing container ${CONTAINER_NAME}..."
+  log_warn "Stopping existing container ${CONTAINER_NAME}"
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 fi
 
-echo "Launching container ${CONTAINER_NAME} from image ${IMAGE_TAG}..."
+log_info "Launching container ${CONTAINER_NAME} from image ${IMAGE_TAG}"
+log_info "Model cache directory: ${MODEL_CACHE_DIR}"
+log_info "Container log file: ${CONTAINER_LOG_FILE}"
+log_info "Run log file: ${RUN_LOG_FILE}"
 
 docker_args=(
   --name
@@ -38,8 +70,12 @@ docker_args=(
   "HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}"
   -e
   "MODEL_CACHE_DIR=/models"
+  -e
+  "LOG_DIR=/logs"
   -v
   "${MODEL_CACHE_DIR}:/models"
+  -v
+  "${LOG_BASE_DIR}:/logs"
 )
 
 if [[ -n "${OPENAI_KEYS}" ]]; then
@@ -102,7 +138,17 @@ detect_host_ips() {
 
 mapfile -t available_ips < <(detect_host_ips)
 
-echo "Container ${CONTAINER_NAME} is running. Access the API at:"
+log_info "Container ${CONTAINER_NAME} is running. Access the API at:"
 for addr in "${available_ips[@]}"; do
-  echo "  http://${addr}:${HOST_PORT}"
+  log_info "  http://${addr}:${HOST_PORT}"
 done
+
+if [[ "${FOLLOW_CONTAINER_LOGS}" == "true" ]]; then
+  log_info "Streaming container logs (Ctrl+C to stop). Output appended to ${CONTAINER_LOG_FILE}"
+  mkdir -p "$(dirname "${CONTAINER_LOG_FILE}")"
+  set +e
+  docker logs -f "${CONTAINER_NAME}" | stdbuf -oL tee -a "${CONTAINER_LOG_FILE}"
+  set -e
+else
+  log_info "Container log streaming disabled (FOLLOW_CONTAINER_LOGS=${FOLLOW_CONTAINER_LOGS})."
+fi
