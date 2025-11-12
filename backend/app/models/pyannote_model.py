@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import importlib.util
 import inspect
 import io
+import json
 import logging
 import os
+import re
 import tempfile
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -344,37 +347,86 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 LOGGER.debug("Impossible de forcer le backend Matplotlib Agg", exc_info=True)
 
             try:
-                from matplotlib import font_manager  # type: ignore
-
-                def _skip_font_scan(*args: Any, **kwargs: Any):
-                    LOGGER.debug(
-                        "Ignoré le scan des polices Matplotlib pour Pyannote"
-                    )
-                    return []
-
-                for attr in ("_get_fontconfig_fonts", "findSystemFonts", "_findSystemFonts"):
-                    if hasattr(font_manager, attr):
-                        setattr(font_manager, attr, _skip_font_scan)
-
-                try:
-                    _ = font_manager.fontManager  # noqa: F841 - force initialisation
-                except Exception:
-                    LOGGER.debug(
-                        "Initialisation du gestionnaire de polices Matplotlib ignorée",
-                        exc_info=True,
-                    )
-            except ModuleNotFoundError:
-                LOGGER.debug(
-                    "Matplotlib est installé mais le sous-module font_manager manque",
-                    exc_info=True,
-                )
+                cache_dir = Path(matplotlib.get_cachedir())
             except Exception:
                 LOGGER.debug(
-                    "Impossible de configurer Matplotlib en mode réduit pour Pyannote.",
-                    exc_info=True,
+                    "Impossible de récupérer le cache Matplotlib", exc_info=True
                 )
+            else:
+                version = self._detect_matplotlib_font_cache_version()
+                if version is not None:
+                    self._ensure_minimal_matplotlib_font_cache(cache_dir, version)
+
+            # L'import de ``matplotlib.font_manager`` déclenche la création d'un
+            # ``FontManager`` global qui scanne l'ensemble du système de
+            # fichiers. Sur certaines images (typiquement celles contenant des
+            # partages réseau montés automatiquement) ce scan peut consommer
+            # plusieurs gigaoctets et provoquer un ``std::bad_alloc`` non
+            # intercepteable côté Python. Pyannote n'a pas besoin de cette
+            # fonctionnalité : nous nous contentons donc de préparer l'environnement
+            # (backend, cache) sans forcer l'import du sous-module.
         except ModuleNotFoundError:
             LOGGER.debug("Matplotlib n'est pas installé; pré-initialisation ignorée")
+
+    @staticmethod
+    def _detect_matplotlib_font_cache_version() -> str | None:
+        """Return the expected font cache version without importing the module."""
+
+        try:
+            spec = importlib.util.find_spec("matplotlib.font_manager")
+        except Exception:  # pragma: no cover - defensive logging only
+            LOGGER.debug(
+                "Impossible de localiser matplotlib.font_manager", exc_info=True
+            )
+            return None
+
+        if spec is None or not spec.origin:
+            return None
+
+        try:
+            source = Path(spec.origin).read_text(encoding="utf-8", errors="ignore")
+        except Exception:  # pragma: no cover - depends on filesystem
+            LOGGER.debug(
+                "Lecture du code source de matplotlib.font_manager impossible",
+                exc_info=True,
+            )
+            return None
+
+        match = re.search(r"FONT_MANAGER_VERSION\s*=\s*(\d+)", source)
+        if not match:
+            return None
+        return match.group(1)
+
+    @staticmethod
+    def _ensure_minimal_matplotlib_font_cache(cache_dir: Path, version: str) -> None:
+        """Create a tiny font cache to prevent expensive scans on import."""
+
+        fontlist_path = cache_dir / f"fontlist-v{version}.json"
+        if fontlist_path.exists():
+            return
+
+        payload = {
+            "_version": int(version),
+            "_FontManager__default_weight": "normal",
+            "default_size": None,
+            "defaultFamily": {"ttf": "DejaVu Sans", "afm": "Helvetica"},
+            "afmlist": [],
+            "ttflist": [],
+        }
+
+        tmp_path = fontlist_path.with_suffix(".tmp")
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            tmp_path.replace(fontlist_path)
+        except Exception:  # pragma: no cover - depends on filesystem permissions
+            LOGGER.debug(
+                "Impossible d'écrire le cache minimal Matplotlib", exc_info=True
+            )
+            tmp_path.unlink(missing_ok=True)
 
     def _select_device_plan(self, torch_module: Any) -> _DevicePlan:
         preferred = self.primary_device()
