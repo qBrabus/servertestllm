@@ -50,6 +50,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         self.pipeline: "Pipeline" | None = None
 
     async def load(self) -> None:
+        self._prepare_matplotlib_environment()
+
         def _load():
             import importlib
 
@@ -204,15 +206,17 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             def _inject_execution_preferences(value: Any) -> Any:
                 plan = plan_holder["plan"]
-                if not plan.use_gpu:
+                if plan.use_gpu:
                     return value
 
+                cpu_device = "cpu"
+
                 if isinstance(value, str):
-                    return {"checkpoint": value, "map_location": plan.device}
+                    return {"checkpoint": value, "map_location": cpu_device}
 
                 if isinstance(value, dict):
                     updated = dict(value)
-                    updated.setdefault("map_location", plan.device)
+                    updated.setdefault("map_location", cpu_device)
                     return updated
 
                 return value
@@ -296,6 +300,56 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             )
 
         await asyncio.to_thread(_load)
+
+    def _prepare_matplotlib_environment(self) -> None:
+        """Initialise Matplotlib in a safe, headless configuration."""
+
+        mpl_cache = self.cache_dir / "matplotlib"
+        mpl_cache.mkdir(parents=True, exist_ok=True)
+
+        os.environ.setdefault("MPLBACKEND", "Agg")
+        os.environ.setdefault("MPLCONFIGDIR", str(mpl_cache))
+
+        try:
+            import matplotlib  # type: ignore
+
+            try:  # pragma: no cover - depends on optional Matplotlib install
+                matplotlib.use("Agg", force=True)
+            except Exception:
+                LOGGER.debug("Impossible de forcer le backend Matplotlib Agg", exc_info=True)
+
+            try:
+                from matplotlib import font_manager  # type: ignore
+
+                def _skip_font_scan(*args: Any, **kwargs: Any):
+                    LOGGER.debug(
+                        "Ignoré le scan des polices Matplotlib pour Pyannote"
+                    )
+                    return []
+
+                for attr in ("_get_fontconfig_fonts", "findSystemFonts", "_findSystemFonts"):
+                    if hasattr(font_manager, attr):
+                        setattr(font_manager, attr, _skip_font_scan)
+
+                try:
+                    _ = font_manager.fontManager  # noqa: F841 - force initialisation
+                except Exception:
+                    LOGGER.debug(
+                        "Initialisation du gestionnaire de polices Matplotlib ignorée",
+                        exc_info=True,
+                    )
+            except ModuleNotFoundError:
+                LOGGER.debug(
+                    "Matplotlib est installé mais le sous-module font_manager manque",
+                    exc_info=True,
+                )
+            except Exception:
+                LOGGER.debug(
+                    "Impossible de configurer Matplotlib en mode réduit pour Pyannote.",
+                    exc_info=True,
+                )
+        except ModuleNotFoundError:
+            LOGGER.debug("Matplotlib n'est pas installé; pré-initialisation ignorée")
 
     def _select_device_plan(self, torch_module: Any) -> _DevicePlan:
         preferred = self.primary_device()
