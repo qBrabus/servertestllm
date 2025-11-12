@@ -7,9 +7,12 @@ import io
 import logging
 import os
 import tempfile
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
+
+from unittest import mock
 
 from .base import BaseModelWrapper, ModelMetadata
 
@@ -234,10 +237,31 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 speaker_diarization_module.get_model = patched_get_model  # type: ignore[assignment]
 
             def _instantiate_pipeline() -> "Pipeline":
-                return Pipeline.from_pretrained(
-                    self.model_id,
-                    **pipeline_kwargs,
-                )
+                """Instantiate Pyannote pipeline while forcing CPU placement."""
+
+                def _restore_cuda_visible(value: str | None) -> None:
+                    if value is None:
+                        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+                    else:
+                        os.environ["CUDA_VISIBLE_DEVICES"] = value
+
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        mock.patch("torch.cuda.is_available", return_value=False)
+                    )
+                    stack.enter_context(
+                        mock.patch("torch.cuda.device_count", return_value=0)
+                    )
+                    previous_cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+                    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+                    stack.callback(
+                        lambda value=previous_cuda_visible: _restore_cuda_visible(value)
+                    )
+
+                    return Pipeline.from_pretrained(
+                        self.model_id,
+                        **pipeline_kwargs,
+                    )
 
             try:
                 try:
