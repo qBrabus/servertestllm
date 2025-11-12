@@ -89,10 +89,22 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 )
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
+            plan_holder: Dict[str, PyannoteDiarizationModel._DevicePlan] = {
+                "plan": self._select_device_plan(torch)
+            }
+
             self.update_runtime(
                 status="Validation de l'environnement",
                 progress=10,
-                details={"preferred_device_ids": self.preferred_device_ids},
+                details={
+                    "preferred_device_ids": self.preferred_device_ids,
+                    "planned_device": str(plan_holder["plan"].device),
+                    "use_gpu": plan_holder["plan"].use_gpu,
+                    "gpu_memory": self._format_memory(
+                        plan_holder["plan"].free_memory,
+                        plan_holder["plan"].total_memory,
+                    ),
+                },
             )
 
             signature = inspect.signature(
@@ -190,26 +202,63 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                     return {_normalise_local_paths(item) for item in value}
                 return value
 
+            def _inject_execution_preferences(value: Any) -> Any:
+                plan = plan_holder["plan"]
+                if not plan.use_gpu:
+                    return value
+
+                if isinstance(value, str):
+                    return {"checkpoint": value, "map_location": plan.device}
+
+                if isinstance(value, dict):
+                    updated = dict(value)
+                    updated.setdefault("map_location", plan.device)
+                    return updated
+
+                return value
+
             def patched_get_model(model: Any, use_auth_token: str | None = None):  # type: ignore[override]
                 patched_model = _expand_reference(model)
                 patched_model = _normalise_local_paths(patched_model)
+                patched_model = _inject_execution_preferences(patched_model)
                 return original_get_model(patched_model, use_auth_token=use_auth_token)
 
             original_speaker_get_model = getattr(speaker_diarization_module, "get_model", None)
             pipeline_getter.get_model = patched_get_model  # type: ignore[assignment]
             if original_speaker_get_model is not None:
                 speaker_diarization_module.get_model = patched_get_model  # type: ignore[assignment]
-            try:
-                self.pipeline = Pipeline.from_pretrained(
+
+            def _instantiate_pipeline() -> "Pipeline":
+                return Pipeline.from_pretrained(
                     self.model_id,
                     **pipeline_kwargs,
                 )
+
+            try:
+                try:
+                    self.pipeline = _instantiate_pipeline()
+                except Exception as exc:
+                    if plan_holder["plan"].use_gpu:
+                        LOGGER.warning(
+                            "Échec du chargement Pyannote sur %s (%s). Nouvelle tentative sur CPU.",
+                            plan_holder["plan"].device,
+                            exc,
+                        )
+                        torch.cuda.empty_cache()
+                        plan_holder["plan"] = self._DevicePlan(
+                            use_gpu=False,
+                            device=torch.device("cpu"),
+                            dtype=None,
+                        )
+                        self.pipeline = _instantiate_pipeline()
+                    else:
+                        raise
             finally:
                 pipeline_getter.get_model = original_get_model  # type: ignore[assignment]
                 if original_speaker_get_model is not None:
                     speaker_diarization_module.get_model = original_speaker_get_model  # type: ignore[assignment]
 
-            plan = self._select_device_plan(torch)
+            plan = plan_holder["plan"]
             if not plan.use_gpu:
                 LOGGER.warning(
                     "Mémoire GPU insuffisante (%s). Pyannote fonctionnera sur CPU.",
@@ -233,6 +282,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                     dtype=None,
                 )
                 plan = self._move_pipeline_to_device(self.pipeline, plan, torch)
+
+            plan_holder["plan"] = plan
 
             self.update_runtime(
                 status="Pipeline Pyannote prêt",
