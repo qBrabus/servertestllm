@@ -337,12 +337,19 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                             mock.patch("numpy.load", side_effect=_safe_numpy_load)
                         )
                         if hasattr(np, "lib") and hasattr(np.lib, "npyio"):
-                            stack.enter_context(
-                                mock.patch(
-                                    "numpy.lib.npyio.load",
-                                    side_effect=_safe_numpy_load,
+                            numpy_npyio = np.lib.npyio
+                            if hasattr(numpy_npyio, "load"):
+                                stack.enter_context(
+                                    mock.patch(
+                                        "numpy.lib.npyio.load",
+                                        side_effect=_safe_numpy_load,
+                                    )
                                 )
-                            )
+                            else:
+                                LOGGER.debug(
+                                    "numpy.lib.npyio ne possède plus d'attribut 'load' ; "
+                                    "aucun patch n'est appliqué."
+                                )
 
                     try:
                         import joblib  # type: ignore
