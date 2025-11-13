@@ -261,6 +261,75 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                         lambda value=previous_cuda_visible: _restore_cuda_visible(value)
                     )
 
+                    joblib_tmp = self.cache_dir / "joblib_tmp"
+                    joblib_tmp.mkdir(parents=True, exist_ok=True)
+                    os.environ.setdefault("JOBLIB_TEMP_FOLDER", str(joblib_tmp))
+
+                    def _should_enable_mmap(target: Any) -> bool:
+                        if not target:
+                            return False
+                        if isinstance(target, (str, os.PathLike)):
+                            suffix = Path(target).suffix.lower()
+                            return suffix in {".npy", ".npz"}
+                        return False
+
+                    try:
+                        import numpy as np  # type: ignore
+                    except ModuleNotFoundError:
+                        np = None  # type: ignore[assignment]
+
+                    if np is not None:
+                        original_numpy_load = np.load
+
+                        def _safe_numpy_load(*args: Any, **kwargs: Any):
+                            if "mmap_mode" not in kwargs and args and _should_enable_mmap(args[0]):
+                                LOGGER.debug(
+                                    "Activation du chargement mémoire-mappé NumPy pour %s",
+                                    args[0],
+                                )
+                                kwargs["mmap_mode"] = "r"
+                            return original_numpy_load(*args, **kwargs)
+
+                        stack.enter_context(
+                            mock.patch("numpy.load", side_effect=_safe_numpy_load)
+                        )
+                        if hasattr(np, "lib") and hasattr(np.lib, "npyio"):
+                            stack.enter_context(
+                                mock.patch(
+                                    "numpy.lib.npyio.load",
+                                    side_effect=_safe_numpy_load,
+                                )
+                            )
+
+                    try:
+                        import joblib  # type: ignore
+                    except ModuleNotFoundError:
+                        joblib = None  # type: ignore[assignment]
+
+                    if joblib is not None:
+                        original_joblib_load = joblib.load
+
+                        def _safe_joblib_load(*args: Any, **kwargs: Any):
+                            if "mmap_mode" not in kwargs:
+                                LOGGER.debug(
+                                    "Activation du chargement mémoire-mappé joblib pour %s",
+                                    args[0] if args else "<inconnu>",
+                                )
+                                kwargs["mmap_mode"] = "r"
+                            return original_joblib_load(*args, **kwargs)
+
+                        stack.enter_context(
+                            mock.patch("joblib.load", side_effect=_safe_joblib_load)
+                        )
+                        numpy_pickle = getattr(joblib, "numpy_pickle", None)
+                        if numpy_pickle is not None:
+                            stack.enter_context(
+                                mock.patch(
+                                    "joblib.numpy_pickle.load",
+                                    side_effect=_safe_joblib_load,
+                                )
+                            )
+
                     return Pipeline.from_pretrained(
                         self.model_id,
                         **pipeline_kwargs,
@@ -338,35 +407,41 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         os.environ.setdefault("MPLBACKEND", "Agg")
         os.environ.setdefault("MPLCONFIGDIR", str(mpl_cache))
 
+        version = self._detect_matplotlib_font_cache_version()
+        if version is not None:
+            self._ensure_minimal_matplotlib_font_cache(mpl_cache, version)
+
         try:
             import matplotlib  # type: ignore
-
-            try:  # pragma: no cover - depends on optional Matplotlib install
-                matplotlib.use("Agg", force=True)
-            except Exception:
-                LOGGER.debug("Impossible de forcer le backend Matplotlib Agg", exc_info=True)
-
-            try:
-                cache_dir = Path(matplotlib.get_cachedir())
-            except Exception:
-                LOGGER.debug(
-                    "Impossible de récupérer le cache Matplotlib", exc_info=True
-                )
-            else:
-                version = self._detect_matplotlib_font_cache_version()
-                if version is not None:
-                    self._ensure_minimal_matplotlib_font_cache(cache_dir, version)
-
-            # L'import de ``matplotlib.font_manager`` déclenche la création d'un
-            # ``FontManager`` global qui scanne l'ensemble du système de
-            # fichiers. Sur certaines images (typiquement celles contenant des
-            # partages réseau montés automatiquement) ce scan peut consommer
-            # plusieurs gigaoctets et provoquer un ``std::bad_alloc`` non
-            # intercepteable côté Python. Pyannote n'a pas besoin de cette
-            # fonctionnalité : nous nous contentons donc de préparer l'environnement
-            # (backend, cache) sans forcer l'import du sous-module.
         except ModuleNotFoundError:
             LOGGER.debug("Matplotlib n'est pas installé; pré-initialisation ignorée")
+            return
+
+        try:  # pragma: no cover - depends on optional Matplotlib install
+            matplotlib.use("Agg", force=True)
+        except Exception:
+            LOGGER.debug("Impossible de forcer le backend Matplotlib Agg", exc_info=True)
+
+        try:
+            cache_dir = Path(matplotlib.get_cachedir())
+        except Exception:
+            LOGGER.debug(
+                "Impossible de récupérer le cache Matplotlib", exc_info=True
+            )
+        else:
+            if version is None:
+                version = self._detect_matplotlib_font_cache_version()
+            if version is not None:
+                self._ensure_minimal_matplotlib_font_cache(cache_dir, version)
+
+        # L'import de ``matplotlib.font_manager`` déclenche la création d'un
+        # ``FontManager`` global qui scanne l'ensemble du système de fichiers.
+        # Sur certaines images (typiquement celles contenant des partages réseau
+        # montés automatiquement) ce scan peut consommer plusieurs gigaoctets et
+        # provoquer un ``std::bad_alloc`` non intercepteable côté Python.
+        # Pyannote n'a pas besoin de cette fonctionnalité : nous nous
+        # contentons donc de préparer l'environnement (backend, cache) sans
+        # forcer l'import du sous-module.
 
     @staticmethod
     def _detect_matplotlib_font_cache_version() -> str | None:
