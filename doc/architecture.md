@@ -41,7 +41,7 @@ L'ensemble est conçu pour fonctionner en environnement à forte contrainte GPU 
 
 - **Registre de modèles** : `ModelRegistry` instancie et met en cache chaque wrapper (`QwenModel`, `CanaryASRModel`, `PyannoteDiarizationModel`). Il gère le téléchargement, le chargement sur GPU et la libération de VRAM.
 - **Gestion des tokens** : `TokenStore` persiste le jeton Hugging Face sur disque (`/models/.hf_token`) et le propage aux wrappers en mémoire.
-- **Supervision** : `GPUMonitor` relève périodiquement l'état des GPU et des ressources systèmes. `dependency_inspector` vérifie que Torch/Torchaudio/Torchvision sont bien compilés avec CUDA.
+- **Supervision** : `GPUMonitor` relève périodiquement l'état des GPU et des ressources systèmes. `dependency_inspector` vérifie que Torch/Torchaudio/Torchvision sont bien compilés avec CUDA et expose `details.cuda_runtime` (attendu : `12.4`).
 - **Front-end** : construit avec Vite + React + Material UI, il consomme les routes `/api/admin/*`, `/api/audio/*`, `/api/diarization/*` et `/v1/*` pour présenter un tableau de bord temps réel.
 
 ## Flux principaux
@@ -70,6 +70,7 @@ L'ensemble est conçu pour fonctionner en environnement à forte contrainte GPU 
 
 - `GET /api/admin/status` agrège l'état des GPU, des métriques système, des modèles et des dépendances. Les wrappers exposent un `runtime_status` mis à jour à chaque étape (téléchargement, chargement, erreur).
 - Les actions de téléchargement/chargement/déchargement (`POST /api/admin/models/<clé>/*`) appellent directement les méthodes du registre.
+- Le frontend signale toute divergence de runtime CUDA via `services/api.ts` (warning console si `torch` n'indique pas `cuda_runtime = 12.4`).
 
 ## Dossiers logiques
 
@@ -80,5 +81,13 @@ L'ensemble est conçu pour fonctionner en environnement à forte contrainte GPU 
 | Frontend React | `frontend/src` | Pages, composants et hooks pour le tableau de bord. |
 | Scripts conteneur | `Dockerfile`, `build_docker.sh`, `run_docker.sh` | Construction et exécution GPU-ready. |
 | Documentation | `doc/` | Notes techniques détaillées (architecture, backend, frontend, exploitation). |
+
+## Trajectoire de conformité CUDA 12.4
+
+1. **Base container** : l'image multi-étapes repose sur `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04` (voir `Dockerfile`).
+2. **Dépendances Python** : `backend/requirements.txt` force `torch==2.6.0+cu124`, `torchaudio==2.6.0+cu124`, `torchvision==0.21.0+cu124` via l'index PyTorch CUDA 12.4.
+3. **Contrôles au démarrage** : `dependency_inspector.gather_dependency_status()` collecte les métadonnées et fournit `details.cuda_runtime` au frontend.
+4. **Alerting UI** : `frontend/src/services/api.ts` trace un avertissement si la pile détectée n'est pas CUDA 12.4 ou si `torch.cuda.is_available()` renvoie `false`.
+5. **Opérations** : `doc/operations.md` propose des commandes (`nvidia-smi`, `docker exec … torch.version.cuda`) pour valider l'environnement avant la mise en production.
 
 Pour une exploration approfondie de chaque brique, reportez-vous aux fichiers dédiés dans ce dossier de documentation.

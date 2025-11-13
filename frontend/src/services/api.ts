@@ -113,6 +113,29 @@ export interface HuggingFaceTokenStatus {
 
 export const fetchDashboard = async (): Promise<DashboardState> => {
   const { data } = await apiClient.get<DashboardState>("/api/admin/status");
+  const expectedCudaRuntime = "12.4";
+  const torchDependency = data.dependencies.find((dependency) => dependency.name === "torch");
+  if (torchDependency) {
+    const details = (torchDependency.details ?? null) as
+      | { cuda_runtime?: unknown; cuda_available?: unknown }
+      | null;
+    const runtime =
+      typeof details?.cuda_runtime === "string" && details.cuda_runtime.trim().length > 0
+        ? details.cuda_runtime.trim()
+        : null;
+    if (!torchDependency.cuda || runtime !== expectedCudaRuntime) {
+      console.warn(
+        "Pile CUDA inattendue côté backend.",
+        {
+          cudaFlag: torchDependency.cuda,
+          runtime,
+          expected: expectedCudaRuntime
+        }
+      );
+    }
+  } else {
+    console.warn("Impossible de récupérer l'état CUDA (entrée 'torch' absente dans dependencies).");
+  }
   return data;
 };
 
