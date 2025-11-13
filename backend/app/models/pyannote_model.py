@@ -461,9 +461,9 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         except Exception:  # pragma: no cover - depends on metadata backend
             LOGGER.debug(
                 "Impossible de récupérer la version Matplotlib depuis importlib.metadata",
-                match = re.search(r"FONT_MANAGER_VERSION\s*=\s*(\d+)", source)
-                if match:
-                    return match.group(1)
+                exc_info=True,
+            )
+            return None
 
         # Matplotlib >= 3.9 ne publie plus la constante ``FONT_MANAGER_VERSION``
         # dans ``font_manager``. Lorsque la lecture du module échoue, on estime
