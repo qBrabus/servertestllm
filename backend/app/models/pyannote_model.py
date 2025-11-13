@@ -69,7 +69,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
                     "torchaudio n'est pas installé. Installez une distribution compatible "
-                    "CUDA (ex. pip install 'torchaudio==2.8.0+cu126' --index-url https://download.pytorch.org/whl/cu126)."
+                    "CUDA (ex. pip install 'torchaudio==2.6.0+cu124' --index-url https://download.pytorch.org/whl/cu124)."
                 ) from exc
             except Exception as exc:  # pragma: no cover - dépend de la binaire installée
                 raise RuntimeError(
@@ -83,7 +83,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
-                    "pyannote.audio >= 4.0 doit être installé pour activer la diarisation."
+                    "pyannote.audio >= 3.3 doit être installé pour activer la diarisation."
                 ) from exc
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
@@ -91,11 +91,12 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             version_tokens = [int(part) for part in pyannote_audio.__version__.split(".") if part.isdigit()][:3]
             version_tuple = tuple(version_tokens + [0] * (3 - len(version_tokens)))
-            if version_tuple < (4, 0, 0):
+            if version_tuple < (3, 3, 0):
                 raise RuntimeError(
-                    "pyannote.audio >= 4.0.0 est requis pour ce pipeline. "
+                    "pyannote.audio >= 3.3.0 est requis pour ce pipeline. "
                     f"Version détectée: {pyannote_audio.__version__}."
                 )
+            is_v4_or_newer = version_tuple >= (4, 0, 0)
 
             auth_token = self.hf_token or os.getenv("HUGGINGFACE_TOKEN")
             plan_holder: Dict[str, PyannoteDiarizationModel._DevicePlan] = {
@@ -138,7 +139,8 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             pipeline_kwargs = {"cache_dir": str(self.cache_dir)}
             if auth_token:
                 pipeline_kwargs["use_auth_token"] = auth_token
-                pipeline_kwargs["token"] = auth_token
+                if is_v4_or_newer:
+                    pipeline_kwargs["token"] = auth_token
 
             from pyannote.audio.pipelines.utils import getter as pipeline_getter
 
