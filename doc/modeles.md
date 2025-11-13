@@ -18,6 +18,14 @@ Cette note approfondit la configuration et les contraintes des trois modèles em
   - Force `VLLM_USE_TRUST_REMOTE_CODE=1` pour charger les kernels personnalisés.
   - Manipule `CUDA_VISIBLE_DEVICES` pour limiter la visibilité GPU au sous-ensemble choisi.
   - Les prompts sont générés avec `tokenizer.apply_chat_template(..., add_generation_prompt=True)`.
+  - Dépend d'un environnement PyTorch compilé pour CUDA 12.4 (`torch==2.6.0+cu124`). Toute divergence apparaît immédiatement dans le tableau `dependencies` du dashboard.
+- **Exemple d'appel** :
+  ```bash
+  curl -X POST http://localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model": "qwen", "messages": [{"role": "user", "content": "Quel est le runtime CUDA installé ?"}]}'
+  ```
+  La réponse doit mentionner explicitement CUDA 12.4 si le backend est correctement configuré.
 
 ## NVIDIA Canary 1B v2 (Reconnaissance vocale)
 
@@ -31,11 +39,14 @@ Cette note approfondit la configuration et les contraintes des trois modèles em
 - **Contraintes** :
   - Requiert `nemo_toolkit[asr]==1.23.0` et un GPU CUDA visible.
   - Le fichier `.nemo` (~3.2 Go) doit être présent dans le cache avant le chargement.
+- **Bonnes pratiques audio** :
+  - Pré-convertir avec `ffmpeg -i input.mp3 -ac 1 -ar 16000 -sample_fmt s16 sample.wav` pour limiter la charge CPU.
+  - Surveiller `dependency_inspector` pour vérifier que `torchaudio` est compilé en `+cu124`.
 
 ## Pyannote speaker diarization
 
 - **Identifiant Hugging Face** : `pyannote/speaker-diarization-community-1`.
-- **Pile logicielle** : `pyannote.audio>=4.0.1`, `torch==2.8.0`.
+- **Pile logicielle** : `pyannote.audio>=4.0.1`, `torch==2.6.0+cu124`, `torchaudio==2.6.0+cu124`.
 - **Téléchargement** :
   - Autorise les motifs `*.bin`, `*.ckpt`, `*.pt`, `*.yaml`, `*.json`.
   - Les références `$MODEL/...` dans les fichiers de config sont résolues en chemins locaux via un patch temporaire du getter Pyannote.
@@ -46,6 +57,8 @@ Cette note approfondit la configuration et les contraintes des trois modèles em
 - **Sortie** :
   - Liste de segments `{ speaker, start, end }` (float secondes).
   - Aucun post-traitement additionnel n'est appliqué (la temporalité brute du pipeline est conservée).
+- **Astuce de validation** :
+  - L'endpoint `POST /api/diarization/process` renvoie `runtime.details.sample_rate` dans le tableau de bord. Une valeur différente de `16000` peut indiquer un mauvais resampling (souvent dû à une installation torchaudio CPU-only).
 
 ## Bonnes pratiques générales
 
@@ -53,5 +66,6 @@ Cette note approfondit la configuration et les contraintes des trois modèles em
 - Pour forcer un re-téléchargement propre, supprimer le dossier `models--<org>--<repo>` correspondant avant d'appeler l'endpoint `download`.
 - Adapter `preferred_device_ids` en fonction du plan de charge GPU (vLLM peut saturer un GPU ; Canary et Pyannote utilisent un seul GPU chacun).
 - Surveiller `runtime.last_error` dans le tableau de bord pour diagnostiquer rapidement les échecs d'initialisation.
+- L'entrée `torch` dans `dependencies` doit toujours afficher `"cuda_runtime": "12.4"` ; sinon, redéployer l'image ou mettre à jour les pilotes hôtes.
 
 Pour des instructions d'exploitation complètes, voir `doc/operations.md`.

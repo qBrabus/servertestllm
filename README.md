@@ -43,8 +43,17 @@ Un registre central (`ModelRegistry`) maintient la liste des modèles, applique 
 
 ## Prérequis
 
-- **Matériel** : GPU NVIDIA compatible CUDA ≥ 12.4 (plateforme cible : DGX 8×H200).
-- **Système** : pilotes NVIDIA et `nvidia-container-toolkit` à jour pour l'exécution conteneurisée.
+- **Matériel** : GPU NVIDIA compatible CUDA ≥ 12.4 (plateforme cible : DGX 8×H200). La plate-forme est validée en production avec des H200 80 Go ; toute carte disposant d'au moins 70 Go de VRAM libre fonctionnera pour Qwen.
+- **Pilotes** : driver ≥ 550.54.15 et `nvidia-container-toolkit` ≥ 1.16.2 pour exposer correctement CUDA 12.4 dans Docker.
+- **Vérification rapide** :
+  ```bash
+  nvidia-smi | head -n 1
+  # NVIDIA-SMI 555.85    Driver Version: 555.85    CUDA Version: 12.4
+  ```
+  Dans le conteneur, la commande suivante doit retourner `True` et `12.4` :
+  ```bash
+  python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+  ```
 - **Réseau** : accès à Hugging Face avec un jeton `HUGGINGFACE_TOKEN` autorisant `nvidia/canary-1b-v2` et `pyannote/speaker-diarization-community-1`.
 - **Logiciel (mode local)** : Python 3.10+, `pip`, `virtualenv`.
 
@@ -77,6 +86,7 @@ Les dossiers `backend/app/models` et `backend/app/services` sont décrits en pro
    ```bash
    pip install -r backend/requirements.txt
    ```
+   > ℹ️ Ce fichier est épinglé sur l'index PyTorch CUDA 12.4 et installe `torch==2.6.0+cu124`, `torchaudio==2.6.0+cu124` et `torchvision==0.21.0+cu124`. Aucune étape manuelle d'installation CUDA n'est requise tant que les pilotes hôtes sont compatibles.
 3. Exporter les variables minimales :
    ```bash
    export HUGGINGFACE_TOKEN="<votre_token>"
@@ -93,7 +103,22 @@ Les dossiers `backend/app/models` et `backend/app/services` sont décrits en pro
    npm install
    npm run dev -- --host
    ```
-   Configurer le proxy Vite (`vite.config.ts`) pour rediriger `/api` et `/v1` vers `http://localhost:8000`.
+  Configurer le proxy Vite (`vite.config.ts`) pour rediriger `/api` et `/v1` vers `http://localhost:8000`.
+6. Vérifier l'environnement CUDA effectif :
+   ```bash
+   curl -s http://localhost:8000/api/admin/status \
+     | jq '.dependencies[] | select(.name=="torch")'
+   # {
+   #   "name": "torch",
+   #   "version": "2.6.0+cu124",
+   #   "cuda": true,
+   #   "details": {
+   #     "cuda_runtime": "12.4",
+   #     "cudnn": "9.1.0",
+   #     "cuda_available": true
+   #   }
+   # }
+   ```
 
 ## Construction et exécution Docker
 
@@ -128,6 +153,12 @@ Options principales (exporter avant exécution) :
 
 Le script rend tous les GPU visibles (`--gpus all`) et affiche automatiquement l'URL d'accès (`http://<adresse>:<port>`), en filtrant les IP Docker internes pour éviter la confusion.
 
+#### Contrôles après démarrage
+
+- `docker logs <container>` doit afficher la bannière FastAPI suivie des messages `ModelRegistry configured` et `GPUMonitor started`.
+- `docker exec -it <container> python -c "import torch; print(torch.version.cuda)"` → `12.4`.
+- `curl http://<hôte>:<port>/api/admin/status | jq '.gpu.devices[] | {name, total, used}'` pour confirmer la visibilité des GPU.
+
 ## Utilisation des APIs
 
 ### Endpoints principaux
@@ -143,6 +174,28 @@ Le script rend tous les GPU visibles (`--gpus all`) et affiche automatiquement l
 | `POST /api/admin/models/{clé}/load` | Charge le modèle sur GPU (option `gpu_device_ids`). | Tous |
 | `POST /api/admin/models/{clé}/unload` | Libère la VRAM. | Tous |
 | `POST /api/admin/huggingface/token` | Met à jour/persiste le jeton HF. | N/A |
+
+#### Exemples d'appel
+
+- **Chat completions** :
+  ```bash
+  curl -X POST http://localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <clé_si_configurée>" \
+    -d '{
+      "model": "qwen",
+      "messages": [
+        {"role": "system", "content": "Tu es un assistant concis."},
+        {"role": "user", "content": "Présente la pile CUDA utilisée."}
+      ]
+    }'
+  ```
+- **Transcription audio** :
+  ```bash
+  curl -X POST http://localhost:8000/api/audio/transcribe \
+    -H "Authorization: Bearer <clé>" \
+    -F "file=@sample.wav"
+  ```
 
 Les clés valides pour `{clé}` sont `qwen`, `canary`, `pyannote`. Le détail de chaque wrapper (paramètres, contraintes) est documenté dans [`doc/modeles.md`](doc/modeles.md).
 
@@ -168,6 +221,15 @@ Pour une description complète des composants React et des flux de données, se 
 - **Validation statique** (environnement CPU) :
   ```bash
   python -m compileall backend/app
+  ```
+- **Smoke test CUDA** (nécessite un GPU) :
+  ```bash
+  python - <<'PY'
+  import torch
+  print('cuda_available=', torch.cuda.is_available())
+  print('cuda_version=', torch.version.cuda)
+  print('device_name=', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')
+  PY
   ```
 - **Lint/TypeScript frontend** :
   ```bash

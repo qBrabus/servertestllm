@@ -4,11 +4,17 @@ Ce guide regroupe les bonnes pratiques pour déployer, exploiter et dépanner la
 
 ## Pré-requis matériels et logiciels
 
-- GPU NVIDIA compatible CUDA 12.4+ (plateforme cible : DGX 8×H200).
-- Pilotes NVIDIA et runtime `nvidia-container-toolkit` à jour.
+- GPU NVIDIA compatible CUDA 12.4+ (plateforme cible : DGX 8×H200). Les déploiements validés utilisent des pilotes 555.xx et exposent 8×H200 ; adaptez `preferred_device_ids` si vous partagez une machine multi-locataire.
+- Pilotes NVIDIA ≥ 550.54.15 et runtime `nvidia-container-toolkit` ≥ 1.16.2. Sans ces versions, Docker ne relaiera pas correctement l'environnement CUDA 12.4.
+- Vérifications rapides côté hôte :
+  ```bash
+  nvidia-smi
+  # ... CUDA Version: 12.4
+  docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi | head -n 1
+  ```
 - Accès réseau à Hugging Face (modèles Canary & Pyannote sont sous contrôle de jeton).
 - Espace disque conséquent pour le cache (`/models`, plusieurs dizaines de Go).
-- Python 3.10+ si exécution hors conteneur.
+- Python 3.10+ si exécution hors conteneur.
 
 ## Variables d'environnement clés
 
@@ -43,6 +49,11 @@ Les scripts `build_docker.sh` et `run_docker.sh` acceptent en plus :
 - Le build installe `apt-utils` pour éviter les erreurs de configuration `debconf`.
 - `MODEL_CACHE_DIR` doit être persistant pour éviter les re-téléchargements.
 - Le conteneur publie par défaut `8000/tcp`; ajuster `HOST_PORT` selon l'environnement.
+- Après le premier démarrage, confirmer l'environnement CUDA 12.4 dans le conteneur :
+  ```bash
+  docker exec -it <container> python -c "import torch; print(torch.version.cuda, torch.cuda.get_device_name(0))"
+  # 12.4 H200 SXM5 80GB
+  ```
 
 ## Gestion du cache Hugging Face
 
@@ -57,6 +68,7 @@ Les scripts `build_docker.sh` et `run_docker.sh` acceptent en plus :
 - Qwen ajuste `CUDA_VISIBLE_DEVICES` avant d'initialiser vLLM et le restaure ensuite.
 - Canary force `torch.cuda.set_device(<id>)` ; Pyannote déplace explicitement son pipeline via `pipeline.to(...)`.
 - `GPUMonitor` expose mémoire utilisée, charge et température. Le front calcule les pourcentages pour afficher des badges.
+- `dependency_inspector` fournit la version CUDA effective (`details.cuda_runtime`) et un booléen `cuda`. Un retour `false` indique soit des pilotes trop anciens, soit un lancement sans `--gpus all`.
 
 ## Journalisation & supervision
 
@@ -81,6 +93,7 @@ Les scripts `build_docker.sh` et `run_docker.sh` acceptent en plus :
 | Pyannote ne trouve pas ses checkpoints | Cache incomplet ou références `$MODEL` non résolues | Forcer `POST /api/admin/models/pyannote/download`, vérifier l'espace disque. |
 | API `/v1` renvoie 401/403 | Clé API non fournie ou invalide | Configurer la clé dans l'UI (dialogue en haut à droite) ou via header `Authorization`. |
 | Tableau de bord vide | Frontend non servi ou `FRONTEND_DIST` incorrect | Regénérer le build (`npm run build`), vérifier le chemin monté. |
+| `dependencies.torch.cuda` vaut `false` | Versions CUDA/PyTorch non alignées | S'assurer que l'image est construite depuis `nvidia/cuda:12.4.1-*`, relancer `pip install -r backend/requirements.txt` et vérifier les pilotes hôtes. |
 
 ## Stratégie de mise à jour
 

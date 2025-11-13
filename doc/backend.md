@@ -8,6 +8,7 @@ Le backend constitue le cœur de la passerelle. Il est structuré autour d'une a
 - Les valeurs sont chargées depuis les variables d'environnement (et facultativement un `.env`).
 - Les clés API OpenAI peuvent être fournies sous forme de liste séparée par des virgules (`OPENAI_API_KEYS`).
 - `model_cache_dir` et `frontend_dist` acceptent des chemins absolus ou relatifs.
+- La compatibilité CUDA 12.4 est imposée par les dépendances (`torch==2.6.0+cu124`) et validée au démarrage via `dependency_inspector`.
 
 ## Cycle de vie de l'application (`main.py`)
 
@@ -57,7 +58,19 @@ Le backend constitue le cœur de la passerelle. Il est structuré autour d'une a
 ### Inspection des dépendances (`services/dependency_inspector.py`)
 
 - Vérifie la présence de `torch`, `torchvision`, `torchaudio`.
-- Rapporte la version, l'état CUDA (runtime compilé, extensions disponibles) et remonte les erreurs de configuration.
+- Rapporte la version, l'état CUDA (runtime compilé, extensions disponibles) et remonte les erreurs de configuration. La sortie attendue pour un déploiement valide est par exemple :
+  ```json
+  {
+    "name": "torch",
+    "version": "2.6.0+cu124",
+    "cuda": true,
+    "details": {
+      "cuda_runtime": "12.4",
+      "cudnn": "9.1.0",
+      "cuda_available": true
+    }
+  }
+  ```
 
 ## Wrappers de modèles (`backend/app/models`)
 
@@ -107,8 +120,9 @@ Tous héritent de `BaseModelWrapper` qui gère :
 
 ## Dépendances critiques
 
-- **PyTorch 2.6.0 + CUDA 12.4** : défini via `--index-url` dans `backend/requirements.txt`.
+- **PyTorch 2.6.0 + CUDA 12.4** : défini via `--extra-index-url https://download.pytorch.org/whl/cu124` dans `backend/requirements.txt`. `torchvision==0.21.0+cu124` et `torchaudio==2.6.0+cu124` sont épinglés pour la même pile.
 - **vLLM 0.11.0**, **NeMo 2.1.0**, **pyannote.audio 4.0.1**.
+- `cupy-cuda12x==13.6.0` (héritée de Ray) et `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` sont fournis automatiquement via les wheels PyTorch.
 - `gputil`, `psutil` pour la supervision.
 - Les épingles strictes (`numpy`, `scipy`, `pandas`, etc.) évitent les re-résolutions pip coûteuses.
 
