@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import importlib.metadata as importlib_metadata
 import importlib.util
 import inspect
 import io
@@ -411,29 +412,6 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         if version is not None:
             self._ensure_minimal_matplotlib_font_cache(mpl_cache, version)
 
-        try:
-            import matplotlib  # type: ignore
-        except ModuleNotFoundError:
-            LOGGER.debug("Matplotlib n'est pas installé; pré-initialisation ignorée")
-            return
-
-        try:  # pragma: no cover - depends on optional Matplotlib install
-            matplotlib.use("Agg", force=True)
-        except Exception:
-            LOGGER.debug("Impossible de forcer le backend Matplotlib Agg", exc_info=True)
-
-        try:
-            cache_dir = Path(matplotlib.get_cachedir())
-        except Exception:
-            LOGGER.debug(
-                "Impossible de récupérer le cache Matplotlib", exc_info=True
-            )
-        else:
-            if version is None:
-                version = self._detect_matplotlib_font_cache_version()
-            if version is not None:
-                self._ensure_minimal_matplotlib_font_cache(cache_dir, version)
-
         # L'import de ``matplotlib.font_manager`` déclenche la création d'un
         # ``FontManager`` global qui scanne l'ensemble du système de fichiers.
         # Sur certaines images (typiquement celles contenant des partages réseau
@@ -445,7 +423,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
     @staticmethod
     def _detect_matplotlib_font_cache_version() -> str | None:
-        """Return the expected font cache version without importing the module."""
+        """Return the expected Matplotlib font cache version."""
 
         try:
             spec = importlib.util.find_spec("matplotlib.font_manager")
@@ -466,6 +444,23 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                     exc_info=True,
                 )
             else:
+                for pattern in (
+                    r"FONT_MANAGER_VERSION\s*=\s*(\d+)",
+                    r"__version__\s*=\s*(\d+)",
+                    r"FontManager\s*\.\s*__version__\s*=\s*(\d+)",
+                ):
+                    match = re.search(pattern, source)
+                    if match:
+                        return match.group(1)
+
+        # Dernier recours : récupérer la version du paquet via importlib.metadata
+        try:
+            version_str = importlib_metadata.version("matplotlib")
+        except importlib_metadata.PackageNotFoundError:
+            return None
+        except Exception:  # pragma: no cover - depends on metadata backend
+            LOGGER.debug(
+                "Impossible de récupérer la version Matplotlib depuis importlib.metadata",
                 match = re.search(r"FONT_MANAGER_VERSION\s*=\s*(\d+)", source)
                 if match:
                     return match.group(1)
@@ -486,6 +481,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             )
             return None
 
+        match = re.match(r"^(\d+)\.(\d+)", version_str)
         version = getattr(matplotlib, "__version__", "")
         match = re.match(r"^(\d+)\.(\d+)", version)
         if not match:
