@@ -219,15 +219,55 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 # ``_move_pipeline_to_device``.
                 map_location = "cpu"
 
-                if isinstance(value, str):
-                    return {"checkpoint": value, "map_location": map_location}
+                def _looks_like_onnx_path(candidate: Any) -> bool:
+                    try:
+                        suffix = Path(str(candidate)).suffix.lower()
+                    except (OSError, TypeError, ValueError):
+                        return False
+                    return suffix == ".onnx"
 
-                if isinstance(value, dict):
-                    updated = dict(value)
-                    updated["map_location"] = map_location
-                    return updated
+                def _dict_targets_onnx(data: Dict[str, Any]) -> bool:
+                    for key in (
+                        "checkpoint",
+                        "model",
+                        "weights",
+                        "path",
+                        "file",
+                    ):
+                        if key in data and _looks_like_onnx_path(data[key]):
+                            return True
+                    return False
 
-                return value
+                def _process(item: Any) -> Any:
+                    if isinstance(item, str):
+                        if _looks_like_onnx_path(item):
+                            return {
+                                "checkpoint": item,
+                                "providers": ["CPUExecutionProvider"],
+                            }
+                        return {"checkpoint": item, "map_location": map_location}
+
+                    if isinstance(item, dict):
+                        updated = {key: _process(val) for key, val in item.items()}
+                        if _dict_targets_onnx(item):
+                            updated.pop("map_location", None)
+                            updated["providers"] = ["CPUExecutionProvider"]
+                        else:
+                            updated.setdefault("map_location", map_location)
+                        return updated
+
+                    if isinstance(item, list):
+                        return [_process(elem) for elem in item]
+
+                    if isinstance(item, tuple):
+                        return tuple(_process(elem) for elem in item)
+
+                    if isinstance(item, set):
+                        return [_process(elem) for elem in item]
+
+                    return item
+
+                return _process(value)
 
             def patched_get_model(model: Any, use_auth_token: str | None = None):  # type: ignore[override]
                 patched_model = _expand_reference(model)
