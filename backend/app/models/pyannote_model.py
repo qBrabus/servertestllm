@@ -453,47 +453,125 @@ class PyannoteDiarizationModel(BaseModelWrapper):
             LOGGER.debug(
                 "Impossible de localiser matplotlib.font_manager", exc_info=True
             )
-            return None
+            spec = None
 
-        if spec is None or not spec.origin:
-            return None
+        if spec is not None and spec.origin:
+            try:
+                source = Path(spec.origin).read_text(
+                    encoding="utf-8", errors="ignore"
+                )
+            except Exception:  # pragma: no cover - depends on filesystem
+                LOGGER.debug(
+                    "Lecture du code source de matplotlib.font_manager impossible",
+                    exc_info=True,
+                )
+            else:
+                match = re.search(r"FONT_MANAGER_VERSION\s*=\s*(\d+)", source)
+                if match:
+                    return match.group(1)
 
+        # Matplotlib >= 3.9 ne publie plus la constante ``FONT_MANAGER_VERSION``
+        # dans ``font_manager``. Lorsque la lecture du module échoue, on estime
+        # la version attendue du cache en se basant sur ``matplotlib.__version__``.
+        # Le format observé des caches est ``fontlist-v{MAJOR}{MINOR:02d}0.json``
+        # (par exemple 3.9 -> v390).
         try:
-            source = Path(spec.origin).read_text(encoding="utf-8", errors="ignore")
-        except Exception:  # pragma: no cover - depends on filesystem
+            import matplotlib  # type: ignore
+        except ModuleNotFoundError:
+            return None
+        except Exception:  # pragma: no cover - import side effects
             LOGGER.debug(
-                "Lecture du code source de matplotlib.font_manager impossible",
+                "Import Matplotlib pour la détection de version impossible",
                 exc_info=True,
             )
             return None
 
-        match = re.search(r"FONT_MANAGER_VERSION\s*=\s*(\d+)", source)
+        version = getattr(matplotlib, "__version__", "")
+        match = re.match(r"^(\d+)\.(\d+)", version)
         if not match:
             return None
-        return match.group(1)
+
+        major, minor = (int(match.group(1)), int(match.group(2)))
+        if major < 0 or minor < 0:
+            return None
+
+        return f"{major}{minor:02d}0"
 
     @staticmethod
     def _ensure_minimal_matplotlib_font_cache(cache_dir: Path, version: str) -> None:
-        """Create a tiny font cache to prevent expensive scans on import."""
+        """Write a compact Matplotlib font cache that satisfies the loader."""
 
         fontlist_path = cache_dir / f"fontlist-v{version}.json"
         if fontlist_path.exists():
             return
 
+        try:
+            numeric_version = int(version)
+        except ValueError:
+            LOGGER.debug("Version de cache Matplotlib invalide: %s", version)
+            return
+
+        # Ces entrées correspondent à des polices embarquées avec Matplotlib.
+        # Elles suffisent pour permettre à ``FontManager`` de satisfaire les
+        # requêtes courantes (polices par défaut) tout en évitant un scan coûteux
+        # du système de fichiers.
         payload = {
-            "_version": int(version),
+            "_version": numeric_version,
             "_FontManager__default_weight": "normal",
             "default_size": None,
             "defaultFamily": {"ttf": "DejaVu Sans", "afm": "Helvetica"},
-            "afmlist": [],
-            "ttflist": [],
+            "afmlist": [
+                {
+                    "fname": "fonts/afm/phvbo8an.afm",
+                    "name": "Helvetica",
+                    "style": "italic",
+                    "variant": "normal",
+                    "weight": "bold",
+                    "stretch": "condensed",
+                    "size": "scalable",
+                    "__class__": "FontEntry",
+                }
+            ],
+            "ttflist": [
+                {
+                    "fname": "fonts/ttf/DejaVuSans.ttf",
+                    "name": "DejaVu Sans",
+                    "style": "normal",
+                    "variant": "normal",
+                    "weight": 400,
+                    "stretch": "normal",
+                    "size": "scalable",
+                    "__class__": "FontEntry",
+                },
+                {
+                    "fname": "fonts/ttf/DejaVuSans-Bold.ttf",
+                    "name": "DejaVu Sans",
+                    "style": "normal",
+                    "variant": "normal",
+                    "weight": 700,
+                    "stretch": "normal",
+                    "size": "scalable",
+                    "__class__": "FontEntry",
+                },
+                {
+                    "fname": "fonts/ttf/DejaVuSansMono.ttf",
+                    "name": "DejaVu Sans Mono",
+                    "style": "normal",
+                    "variant": "normal",
+                    "weight": 400,
+                    "stretch": "normal",
+                    "size": "scalable",
+                    "__class__": "FontEntry",
+                },
+            ],
+            "__class__": "FontManager",
         }
 
         tmp_path = fontlist_path.with_suffix(".tmp")
         try:
             cache_dir.mkdir(parents=True, exist_ok=True)
             tmp_path.write_text(
-                json.dumps(payload, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             tmp_path.replace(fontlist_path)
