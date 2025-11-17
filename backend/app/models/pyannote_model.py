@@ -29,7 +29,7 @@ if TYPE_CHECKING:  # pragma: no cover - uniquement pour le typage
 
 
 class PyannoteDiarizationModel(BaseModelWrapper):
-    model_id = "pyannote/speaker-diarization-community-1"
+    model_id = "pyannote/speaker-diarization-3.1"
 
     _MIN_GPU_MEMORY_BYTES = 5 * 1024 ** 3  # ~5 Go de mémoire libre requise
 
@@ -50,7 +50,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
         metadata = ModelMetadata(
             identifier=self.model_id,
             task="speaker-diarization",
-            description="Pyannote diarization community pipeline",
+            description="Pyannote diarization 3.1 pipeline",
             format="wav/ogg/flac",
         )
         super().__init__(metadata, cache_dir, hf_token, preferred_device_ids)
@@ -83,7 +83,7 @@ class PyannoteDiarizationModel(BaseModelWrapper):
                 from pyannote.audio.pipelines import speaker_diarization as speaker_diarization_module
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
-                    "pyannote.audio >= 3.3 doit être installé pour activer la diarisation."
+                    "pyannote.audio >= 3.4 doit être installé pour activer la diarisation."
                 ) from exc
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
@@ -91,9 +91,9 @@ class PyannoteDiarizationModel(BaseModelWrapper):
 
             version_tokens = [int(part) for part in pyannote_audio.__version__.split(".") if part.isdigit()][:3]
             version_tuple = tuple(version_tokens + [0] * (3 - len(version_tokens)))
-            if version_tuple < (3, 3, 0):
+            if version_tuple < (3, 4, 0):
                 raise RuntimeError(
-                    "pyannote.audio >= 3.3.0 est requis pour ce pipeline. "
+                    "pyannote.audio >= 3.4.0 est requis pour ce pipeline. "
                     f"Version détectée: {pyannote_audio.__version__}."
                 )
             is_v4_or_newer = version_tuple >= (4, 0, 0)

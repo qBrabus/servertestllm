@@ -54,7 +54,7 @@ Un registre central (`ModelRegistry`) maintient la liste des modèles, applique 
   ```bash
   python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
   ```
-- **Réseau** : accès à Hugging Face avec un jeton `HUGGINGFACE_TOKEN` autorisant `nvidia/canary-1b-v2` et `pyannote/speaker-diarization-community-1`.
+- **Réseau** : accès à Hugging Face avec un jeton `HUGGINGFACE_TOKEN` autorisant `nvidia/canary-1b-v2` et `pyannote/speaker-diarization-3.1`.
 - **Logiciel (mode local)** : Python 3.10+, `pip`, `virtualenv`.
 
 ## Structure du dépôt

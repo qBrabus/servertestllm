@@ -45,13 +45,13 @@ Cette note approfondit la configuration et les contraintes des trois modèles em
 
 ## Pyannote speaker diarization
 
-- **Identifiant Hugging Face** : `pyannote/speaker-diarization-community-1`.
-- **Pile logicielle** : `pyannote.audio>=4.0.1`, `torch==2.6.0+cu124`, `torchaudio==2.6.0+cu124`.
+- **Identifiant Hugging Face** : `pyannote/speaker-diarization-3.1`.
+- **Pile logicielle** : `pyannote.audio>=3.4.0`, `torch==2.6.0+cu124`, `torchaudio==2.6.0+cu124`.
 - **Téléchargement** :
   - Autorise les motifs `*.bin`, `*.ckpt`, `*.pt`, `*.yaml`, `*.json`.
   - Les références `$MODEL/...` dans les fichiers de config sont résolues en chemins locaux via un patch temporaire du getter Pyannote.
-- **Initialisation** :
-  - Vérifie la compatibilité de la version Pyannote (`>=4`) et la disponibilité CUDA.
+  - **Initialisation** :
+    - Vérifie la compatibilité de la version Pyannote (`>=3.4`) et la disponibilité CUDA.
   - Déplace explicitement le pipeline sur `cuda:<id>` choisi.
   - Nettoie les patches (`get_model`) après initialisation pour éviter de modifier l'environnement global.
 - **Sortie** :

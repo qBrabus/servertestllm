@@ -143,9 +143,9 @@ class ModelRegistry:
         self.register(
             "pyannote",
             metadata=ModelMetadata(
-                identifier="pyannote/speaker-diarization-community-1",
+                identifier="pyannote/speaker-diarization-3.1",
                 task="speaker-diarization",
-                description="Pyannote diarization community pipeline",
+                description="Pyannote diarization 3.1 pipeline",
                 format="wav/ogg/flac",
             ),
             factory=_pyannote_factory,
