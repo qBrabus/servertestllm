@@ -193,10 +193,13 @@ async def serve_index() -> str:
 
 @app.get("/status")
 async def proxy_status() -> JSONResponse:
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=REQUEST_TIMEOUT) as client:
-        resp = await client.get("/api/admin/status", headers=_auth_headers())
-    resp.raise_for_status()
-    return JSONResponse(resp.json())
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=REQUEST_TIMEOUT) as client:
+            resp = await client.get("/api/admin/status", headers=_auth_headers())
+        resp.raise_for_status()
+        return JSONResponse(resp.json())
+    except httpx.HTTPError as exc:  # pragma: no cover - dépend du réseau
+        raise HTTPException(status_code=502, detail=f"Impossible de joindre l'API upstream: {exc}") from exc
 
 
 @app.post("/process_audio")
@@ -205,36 +208,39 @@ async def process_audio(file: UploadFile = File(...)) -> JSONResponse:
     if not content:
         raise HTTPException(status_code=400, detail="Fichier audio vide")
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=REQUEST_TIMEOUT) as client:
-        # Transcription Canary
-        trans_resp = await client.post(
-            "/api/audio/transcribe",
-            files={"file": (file.filename, content, file.content_type or "application/octet-stream")},
-            headers=_auth_headers(),
-        )
-        trans_resp.raise_for_status()
-        transcription = trans_resp.json()
-        trans_segments = _fallback_segments(transcription)
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=REQUEST_TIMEOUT) as client:
+            # Transcription Canary
+            trans_resp = await client.post(
+                "/api/audio/transcribe",
+                files={"file": (file.filename, content, file.content_type or "application/octet-stream")},
+                headers=_auth_headers(),
+            )
+            trans_resp.raise_for_status()
+            transcription = trans_resp.json()
+            trans_segments = _fallback_segments(transcription)
 
-        # Diarisation Pyannote
-        diar_resp = await client.post(
-            "/api/diarization/process",
-            files={"file": (file.filename, content, file.content_type or "application/octet-stream")},
-            headers=_auth_headers(),
-        )
-        diar_resp.raise_for_status()
-        diarization = diar_resp.json().get("segments", [])
+            # Diarisation Pyannote
+            diar_resp = await client.post(
+                "/api/diarization/process",
+                files={"file": (file.filename, content, file.content_type or "application/octet-stream")},
+                headers=_auth_headers(),
+            )
+            diar_resp.raise_for_status()
+            diarization = diar_resp.json().get("segments", [])
 
-        english_text = transcription.get("text", "")
-        translations = await _translate_transcript(client, english_text)
+            english_text = transcription.get("text", "")
+            translations = await _translate_transcript(client, english_text)
 
-        if diarization:
-            speaker_texts = _aggregate_by_speaker(diarization, trans_segments)
-            labels = await _label_speakers(client, speaker_texts, translations["english"])
-            timeline = _decorate_diarization(diarization, labels, trans_segments)
-        else:
-            labels = {}
-            timeline = []
+            if diarization:
+                speaker_texts = _aggregate_by_speaker(diarization, trans_segments)
+                labels = await _label_speakers(client, speaker_texts, translations["english"])
+                timeline = _decorate_diarization(diarization, labels, trans_segments)
+            else:
+                labels = {}
+                timeline = []
+    except httpx.HTTPError as exc:  # pragma: no cover - dépend du réseau
+        raise HTTPException(status_code=502, detail=f"Erreur en appelant l'API upstream: {exc}") from exc
 
     payload = {
         "translations": translations,

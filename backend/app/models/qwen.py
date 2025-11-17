@@ -34,7 +34,8 @@ class QwenModel(BaseModelWrapper):
     async def load(self) -> None:
         def _load():
             import torch
-            from transformers import AutoTokenizer
+            import json
+            from transformers import AutoConfig, AutoTokenizer
             from vllm import AsyncEngineArgs, AsyncLLMEngine
 
             if not torch.cuda.is_available():  # pragma: no cover - dépend du matériel
@@ -69,8 +70,44 @@ class QwenModel(BaseModelWrapper):
                 )
 
                 download_root = self._download_repo(auth_token)
-
                 model_path = Path(download_root)
+
+                # Certains configs Qwen3 VL ne définissent pas explicitement
+                # vocab_size. vLLM s'attend à ce champ et plante sinon, on
+                # l'injecte donc depuis text_config ou le tokenizer si besoin.
+                def _ensure_vocab_size() -> None:
+                    config_path = model_path / "config.json"
+                    if not config_path.exists():
+                        return
+                    try:
+                        with config_path.open("r", encoding="utf-8") as f:
+                            cfg_dict = json.load(f)
+
+                        if "vocab_size" in cfg_dict:
+                            return
+
+                        hf_config = AutoConfig.from_pretrained(
+                            str(model_path),
+                            trust_remote_code=True,
+                            use_auth_token=auth_token,
+                        )
+                        vocab_size = getattr(hf_config, "vocab_size", None)
+                        if vocab_size is None and hasattr(hf_config, "text_config"):
+                            vocab_size = getattr(hf_config.text_config, "vocab_size", None)
+
+                        if vocab_size is None:
+                            return
+
+                        cfg_dict["vocab_size"] = int(vocab_size)
+                        with config_path.open("w", encoding="utf-8") as f:
+                            json.dump(cfg_dict, f, ensure_ascii=False, indent=2)
+                    except Exception:
+                        # On ne bloque pas le chargement si l'injection échoue
+                        # (vLLM plantera plus tard, mais on préfère laisser
+                        # l'erreur originale remonter).
+                        return
+
+                _ensure_vocab_size()
                 self.update_runtime(progress=68, status="Chargement du tokenizer", downloaded=True)
 
                 self.tokenizer = AutoTokenizer.from_pretrained(
