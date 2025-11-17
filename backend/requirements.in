@@ -34,7 +34,7 @@ accelerate>=1.1
 transformers>=4.57
 huggingface-hub>=0.26
 vllm==0.8.5
-pyannote.audio==3.3.2
+pyannote.audio==3.4.0
 
 # Lightning ecosystem
 lightning==2.4.0
