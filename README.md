@@ -262,5 +262,6 @@ Cette commande régénère `backend/requirements.txt` en respectant l'index PyTo
 - [`doc/frontend.md`](doc/frontend.md) : structure du tableau de bord, interactions avec l'API.
 - [`doc/operations.md`](doc/operations.md) : bonnes pratiques de déploiement, gestion du cache, dépannage rapide.
 - [`doc/modeles.md`](doc/modeles.md) : fiches techniques des modèles (contraintes GPU, taille, particularités).
+- [`doc/standalone_dashboard.md`](doc/standalone_dashboard.md) : mini-dashboard FastAPI autonome pour superviser les GPUs et lancer la pipeline audio Canary/Pyannote hors conteneur.
 
 Bon usage ! Toute contribution doit conserver l'exécution GPU-only, les épingles de dépendances et la documentation en français.
